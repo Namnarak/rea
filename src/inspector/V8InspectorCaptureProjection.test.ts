@@ -96,3 +96,142 @@ it("authorizes distinct Inspector locations and preserves stable deduplication",
     invalid_protocol_value: 0,
   });
 });
+
+it("authorizes every unique script location through a bounded worker pool", async () => {
+  const drafts = Array.from({ length: 200 }, (_, index) => ({
+    rawUrl: `file:///fixture/script-${String(index)}.js`,
+    executionContextKey: "1",
+    cdpHash: `hash-${String(index)}`,
+    length: 7,
+    isModule: false,
+  }));
+  const state: CaptureState = {
+    scripts: [
+      ...drafts,
+      ...drafts.slice(0, 1),
+      {
+        rawUrl: "ftp://example.test/unapproved.js",
+        executionContextKey: null,
+        cdpHash: null,
+        length: 0,
+        isModule: false,
+      },
+    ],
+    contexts: new Map(),
+    eventsObserved: 202,
+    eventsRetained: 202,
+    eventsDropped: 0,
+    metadataBytes: 0,
+    scriptsObserved: 202,
+    invalidScripts: 0,
+    truncated: false,
+    truncationReasons: new Set(),
+  };
+  const activeUrls = new Set<string>();
+  const authorizedUrls = new Set<string>();
+  let maximumActive = 0;
+  const result = await finalizeInspectorCapture({
+    input: {
+      inspector_endpoint: "http://127.0.0.1:9222",
+      target_id: "target-1",
+      observation_ms: 100,
+    },
+    runtime: {
+      product: "Node.js/v24.18.0",
+      protocol_version: "1.3",
+      v8_version: null,
+    },
+    target: {
+      id: "target-1",
+      type: "node",
+      url: "file:///tmp/target.js",
+      attached: false,
+      webSocketUrl: "ws://127.0.0.1:9222/target-1",
+      location: { kind: "file", file_path: "/tmp/target.js" },
+    },
+    state,
+    authorizeLocation: async (rawUrl) => {
+      activeUrls.add(rawUrl);
+      authorizedUrls.add(rawUrl);
+      maximumActive = Math.max(maximumActive, activeUrls.size);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      activeUrls.delete(rawUrl);
+      return rawUrl.startsWith("ftp:")
+        ? { allowed: false, reason: "unsupported_url" }
+        : {
+            allowed: true,
+            location: { kind: "file", file_path: rawUrl },
+          };
+    },
+  });
+
+  expect(maximumActive).toBeGreaterThan(1);
+  expect(maximumActive).toBeLessThanOrEqual(8);
+  expect(authorizedUrls.size).toBe(201);
+  expect(activeUrls.size).toBe(0);
+  expect(result.scripts.items).toHaveLength(200);
+  expect(result.scripts.observed_total).toBe(202);
+  expect(result.scripts.excluded).toEqual({
+    unsupported_location: 1,
+    invalid_protocol_value: 0,
+  });
+});
+
+it("waits for active authorization workers to settle before returning a failure", async () => {
+  const scripts = Array.from({ length: 12 }, (_, index) => ({
+    rawUrl: `file:///fixture/failure-${String(index)}.js`,
+    executionContextKey: null,
+    cdpHash: null,
+    length: 0,
+    isModule: false,
+  }));
+  const state: CaptureState = {
+    scripts,
+    contexts: new Map(),
+    eventsObserved: scripts.length,
+    eventsRetained: scripts.length,
+    eventsDropped: 0,
+    metadataBytes: 0,
+    scriptsObserved: scripts.length,
+    invalidScripts: 0,
+    truncated: false,
+    truncationReasons: new Set(),
+  };
+  const activeUrls = new Set<string>();
+  const failure = new Error("authorization failed");
+
+  await expect(
+    finalizeInspectorCapture({
+      input: {
+        inspector_endpoint: "http://127.0.0.1:9222",
+        target_id: "target-1",
+        observation_ms: 100,
+      },
+      runtime: {
+        product: "Node.js/v24.18.0",
+        protocol_version: "1.3",
+        v8_version: null,
+      },
+      target: {
+        id: "target-1",
+        type: "node",
+        url: "file:///tmp/target.js",
+        attached: false,
+        webSocketUrl: "ws://127.0.0.1:9222/target-1",
+        location: { kind: "file", file_path: "/tmp/target.js" },
+      },
+      state,
+      authorizeLocation: async (rawUrl) => {
+        activeUrls.add(rawUrl);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        activeUrls.delete(rawUrl);
+        if (rawUrl.endsWith("failure-0.js")) throw failure;
+        return {
+          allowed: true,
+          location: { kind: "file", file_path: rawUrl },
+        };
+      },
+    }),
+  ).rejects.toBe(failure);
+  expect(activeUrls.size).toBe(0);
+});

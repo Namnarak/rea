@@ -38,6 +38,14 @@ interface FinalizeCaptureInput {
   readonly runtime: JavaScriptRuntimeTargetList["runtime"];
   readonly target: AuthorizedV8InspectorTarget;
   readonly state: CaptureState;
+  readonly authorizeLocation?: typeof authorizeRuntimeLocation;
+}
+
+const LOCATION_AUTHORIZATION_WORKERS = 8;
+
+interface AuthorizedLocationGroup {
+  readonly drafts: readonly ScriptDraft[];
+  readonly decision: Awaited<ReturnType<typeof authorizeRuntimeLocation>>;
 }
 
 /** Canonically authorize, deduplicate, and sort one bounded raw capture. */
@@ -46,6 +54,7 @@ export const finalizeInspectorCapture = async ({
   runtime,
   target,
   state,
+  authorizeLocation = authorizeRuntimeLocation,
 }: FinalizeCaptureInput): Promise<JavaScriptRuntimeObservation> => {
   const exclusions = createInspectorExclusionCounts();
   const scripts = new Map<
@@ -58,12 +67,32 @@ export const finalizeInspectorCapture = async ({
     drafts.push(draft);
     draftsByUrl.set(draft.rawUrl, drafts);
   }
-  const authorizedGroups = await Promise.all(
-    [...draftsByUrl].map(async ([rawUrl, drafts]) => ({
-      drafts,
-      decision: await authorizeRuntimeLocation(rawUrl),
-    })),
+  const groups = [...draftsByUrl];
+  const authorizedGroups: AuthorizedLocationGroup[] = new Array(groups.length);
+  let nextGroup = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const index = nextGroup;
+      nextGroup += 1;
+      const group = groups[index];
+      if (group === undefined) return;
+      const [rawUrl, drafts] = group;
+      authorizedGroups[index] = {
+        drafts,
+        decision: await authorizeLocation(rawUrl),
+      };
+    }
+  };
+  const workerResults = await Promise.allSettled(
+    Array.from(
+      { length: Math.min(LOCATION_AUTHORIZATION_WORKERS, groups.length) },
+      worker,
+    ),
   );
+  const failedWorker = workerResults.find(
+    (result) => result.status === "rejected",
+  );
+  if (failedWorker?.status === "rejected") throw failedWorker.reason;
   for (const { drafts, decision } of authorizedGroups) {
     for (const draft of drafts) {
       if (!decision.allowed) {
