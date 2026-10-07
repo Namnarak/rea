@@ -70,17 +70,24 @@ export const finalizeInspectorCapture = async ({
   const groups = [...draftsByUrl];
   const authorizedGroups: AuthorizedLocationGroup[] = new Array(groups.length);
   let nextGroup = 0;
+  let stopScheduling = false;
   const worker = async (): Promise<void> => {
-    for (;;) {
-      const index = nextGroup;
-      nextGroup += 1;
-      const group = groups[index];
-      if (group === undefined) return;
-      const [rawUrl, drafts] = group;
-      authorizedGroups[index] = {
-        drafts,
-        decision: await authorizeLocation(rawUrl),
-      };
+    try {
+      for (;;) {
+        if (stopScheduling) return;
+        const index = nextGroup;
+        nextGroup += 1;
+        const group = groups[index];
+        if (group === undefined) return;
+        const [rawUrl, drafts] = group;
+        authorizedGroups[index] = {
+          drafts,
+          decision: await authorizeLocation(rawUrl),
+        };
+      }
+    } catch (cause: unknown) {
+      stopScheduling = true;
+      throw cause;
     }
   };
   const workerResults = await Promise.allSettled(

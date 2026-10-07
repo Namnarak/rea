@@ -198,40 +198,52 @@ it("waits for active authorization workers to settle before returning a failure"
     truncationReasons: new Set(),
   };
   const activeUrls = new Set<string>();
+  const startedUrls: string[] = [];
+  const releaseActive: Array<() => void> = [];
   const failure = new Error("authorization failed");
+  const failureSeen = new Promise<void>((resolve) =>
+    releaseActive.push(resolve),
+  );
 
-  await expect(
-    finalizeInspectorCapture({
-      input: {
-        inspector_endpoint: "http://127.0.0.1:9222",
-        target_id: "target-1",
-        observation_ms: 100,
-      },
-      runtime: {
-        product: "Node.js/v24.18.0",
-        protocol_version: "1.3",
-        v8_version: null,
-      },
-      target: {
-        id: "target-1",
-        type: "node",
-        url: "file:///tmp/target.js",
-        attached: false,
-        webSocketUrl: "ws://127.0.0.1:9222/target-1",
-        location: { kind: "file", file_path: "/tmp/target.js" },
-      },
-      state,
-      authorizeLocation: async (rawUrl) => {
-        activeUrls.add(rawUrl);
-        await new Promise((resolve) => setTimeout(resolve, 1));
-        activeUrls.delete(rawUrl);
-        if (rawUrl.endsWith("failure-0.js")) throw failure;
-        return {
-          allowed: true,
-          location: { kind: "file", file_path: rawUrl },
-        };
-      },
-    }),
-  ).rejects.toBe(failure);
+  const finalization = finalizeInspectorCapture({
+    input: {
+      inspector_endpoint: "http://127.0.0.1:9222",
+      target_id: "target-1",
+      observation_ms: 100,
+    },
+    runtime: {
+      product: "Node.js/v24.18.0",
+      protocol_version: "1.3",
+      v8_version: null,
+    },
+    target: {
+      id: "target-1",
+      type: "node",
+      url: "file:///tmp/target.js",
+      attached: false,
+      webSocketUrl: "ws://127.0.0.1:9222/target-1",
+      location: { kind: "file", file_path: "/tmp/target.js" },
+    },
+    state,
+    authorizeLocation: async (rawUrl) => {
+      startedUrls.push(rawUrl);
+      if (rawUrl.endsWith("failure-0.js")) {
+        releaseActive[0]?.();
+        throw failure;
+      }
+      activeUrls.add(rawUrl);
+      await new Promise<void>((resolve) => releaseActive.push(resolve));
+      activeUrls.delete(rawUrl);
+      return {
+        allowed: true,
+        location: { kind: "file", file_path: rawUrl },
+      };
+    },
+  });
+  await failureSeen;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(startedUrls).toEqual(scripts.slice(0, 8).map(({ rawUrl }) => rawUrl));
+  for (const release of releaseActive.slice(1)) release();
+  await expect(finalization).rejects.toBe(failure);
   expect(activeUrls.size).toBe(0);
 });
