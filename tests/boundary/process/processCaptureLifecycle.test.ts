@@ -163,6 +163,20 @@ itWithCaptureCapability(
     const root = await createTestTempDirectory("rea-snapshot-io-error-");
     const obstruction = join(root, "not-a-directory");
     await writeFile(obstruction, "file");
+    const controller = new AbortController();
+    const { signal } = controller;
+    let signalReads = 0;
+    let aborted = false;
+    Object.defineProperty(signal, "aborted", {
+      get: () => {
+        signalReads += 1;
+        if (signalReads === 3) {
+          aborted = true;
+          controller.abort();
+        }
+        return aborted;
+      },
+    });
 
     const result = await captureProcessScenario(
       parseProcessScenario({
@@ -170,8 +184,10 @@ itWithCaptureCapability(
         working_directory: root,
         filesystem_observation_paths: [join(obstruction, "child")],
       }),
+      signal,
     );
 
+    expect(signalReads).toBe(3);
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected filesystem observation failure");
     expect(result.error).toMatchObject({

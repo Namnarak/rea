@@ -236,7 +236,16 @@ const finishProcessRun = async (options: {
 const normalizeCaptureFailure = (
   cause: unknown,
   signal: AbortSignal | undefined,
-): unknown => (signal?.aborted === true ? processCaptureCancelled() : cause);
+): unknown => {
+  if (cause instanceof ProcessCaptureError) return cause;
+  if (
+    signal?.aborted === true &&
+    (cause === signal.reason ||
+      (cause instanceof Error && cause.name === "AbortError"))
+  )
+    return processCaptureCancelled();
+  return cause;
+};
 
 const completeCapture = async (options: {
   readonly scenario: ProcessScenario;
