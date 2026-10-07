@@ -49,6 +49,7 @@ const SOURCE_PATHS = {
   androidProvider: "dist/android/JadxRelease.js",
   managedWorkflowContracts: "dist/contracts/managedWorkflowToolContracts.js",
   browserContracts: "dist/contracts/browserToolContracts.js",
+  webRuntimeContracts: "dist/contracts/webRuntimeToolContracts.js",
   browserScenarioContracts: "dist/contracts/browserScenarioToolContracts.js",
   electronContracts: "dist/contracts/javascript/electronToolContracts.js",
   javascriptRuntimeObservationContracts:

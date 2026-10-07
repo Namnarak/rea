@@ -1,0 +1,377 @@
+import assert from "node:assert/strict";
+import { spawn, execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { once } from "node:events";
+import { access, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { CdpBrowserProvider } from "../../dist/browser/CdpBrowserProvider.js";
+import { CdpConnection } from "../../dist/browser/CdpConnection.js";
+import { waitForBrowserDevtoolsPort } from "../../dist/browser/BrowserProcessStartup.js";
+import { parseEvidence } from "../../dist/domain/evidence.js";
+import { webExecutionSchema } from "../../dist/domain/webExecution.js";
+import { webEventListenersSchema } from "../../dist/domain/webEventListeners.js";
+import { startBrowserRuntimeSite } from "../fixtures/browser-runtime-site.mjs";
+import { mcpTextValue } from "./mcp-verifier-results.mjs";
+
+/** Exercise native browser runtime attribution through public CLI and stdio MCP, including arming. */
+export async function verifyBrowserRuntime(
+  executable,
+  entrypoint = fileURLToPath(new URL("../rea.mjs", import.meta.url)),
+) {
+  await access(executable);
+  const site = await startBrowserRuntimeSite();
+  const profile = await mkdtemp(join(tmpdir(), "rea-real-web-runtime-"));
+  const browser = spawn(
+    executable,
+    [
+      "--headless=new",
+      ...(process.env.REA_BROWSER_NO_SANDBOX === "true"
+        ? ["--no-sandbox"]
+        : []),
+      "--remote-debugging-address=127.0.0.1",
+      "--remote-debugging-port=0",
+      `--user-data-dir=${profile}`,
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--disable-background-networking",
+      "--disable-component-update",
+      "--disable-dev-shm-usage",
+      "--disable-sync",
+      site.origin,
+    ],
+    { stdio: ["ignore", "ignore", "pipe"] },
+  );
+  let stderr = "";
+  browser.stderr.on("data", (chunk) => {
+    if (stderr.length < 65536) stderr += chunk;
+  });
+  let action;
+  let client;
+  try {
+    const port = await waitForBrowserDevtoolsPort({
+      child: browser,
+      executable,
+      activePortPath: join(profile, "DevToolsActivePort"),
+      stderr: () => stderr,
+      timeoutMs: 20_000,
+    });
+    const endpoint = `http://127.0.0.1:${port}`;
+    const targets = await new CdpBrowserProvider().listTargets({
+      cdp_endpoint: endpoint,
+      allowed_origins: [site.origin],
+    });
+    if (!targets.ok) throw targets.error;
+    const target = targets.value.targets[0];
+    assert.ok(target, "owned fixture page target missing");
+    const pages = await (await fetch(`${endpoint}/json/list`)).json();
+    const page = pages.find((candidate) => candidate.id === target.target_id);
+    action = await CdpConnection.connect(
+      page.webSocketDebuggerUrl,
+      "inspect_web_page",
+    );
+    await ready(action);
+    const env = {
+      ...process.env,
+      REA_LOG_LEVEL: "silent",
+      HOPPER_LAUNCHER_PATH: "/rea-unconfigured-provider/hopper",
+    };
+    const input = { cdp_endpoint: endpoint, target_id: target.target_id };
+    const cliListener = await promisify(execFile)(
+      process.execPath,
+      [
+        entrypoint,
+        "inspect-web-event-listeners",
+        endpoint,
+        target.target_id,
+        "#run",
+        "--json",
+      ],
+      { env, timeout: 40_000, maxBuffer: 64 * 1024 * 1024 },
+    );
+    const cliListenerProof = assertListeners(
+      parseEvidence(JSON.parse(cliListener.stdout)),
+      site,
+    );
+    const cliExecution = await executionCli(entrypoint, input, env, action);
+    const cliProof = assertExecution(
+      parseEvidence(JSON.parse(cliExecution)),
+      site,
+    );
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [entrypoint, "mcp"],
+      env,
+      stderr: "pipe",
+    });
+    client = new Client({ name: "web-runtime-real-e2e", version: "1" });
+    await client.connect(transport);
+    const listenerResponse = await client.callTool({
+      name: "inspect_web_event_listeners",
+      arguments: { ...input, selector: "#run" },
+    });
+    assert.notEqual(
+      listenerResponse.isError,
+      true,
+      mcpTextValue(listenerResponse),
+    );
+    const mcpListenerProof = assertListeners(
+      parseEvidence(JSON.parse(mcpTextValue(listenerResponse)).evidence),
+      site,
+    );
+    const mcpProof = await executionMcp(client, input, action, site, false);
+    assert.equal(cliProof.selected_sha256, mcpProof.selected_sha256);
+    assert.equal(cliListenerProof.sha256, mcpListenerProof.sha256);
+    await reloadFixture(action);
+    const freshMcpProof = await executionMcp(client, input, action, site);
+    assert.equal(site.evidenceRequests(), 3);
+    const stillOpen = await action.send("Runtime.evaluate", {
+      expression: "Boolean(document.querySelector('#run'))",
+      returnByValue: true,
+    });
+    assert.equal(
+      stillOpen.result.value,
+      true,
+      "REA must preserve the externally owned page",
+    );
+    return {
+      product: target,
+      cli: cliProof,
+      mcp: mcpProof,
+      listener: cliListenerProof,
+      public_cases: 5,
+      fresh_mcp: freshMcpProof,
+      page_remained_open: true,
+    };
+  } finally {
+    await client?.close();
+    await action?.close();
+    if (browser.exitCode === null && browser.signalCode === null) {
+      browser.kill("SIGTERM");
+      await once(browser, "exit");
+    }
+    await site.close();
+    await rm(profile, { recursive: true, force: true });
+  }
+}
+
+async function executionMcp(client, input, action, site, requireBlock = true) {
+  let actionPromise;
+  const response = await client.callTool(
+    {
+      name: "observe_web_execution",
+      arguments: { ...input, observation_ms: 300 },
+    },
+    {
+      timeout: 40_000,
+      onprogress: (notification) => {
+        if (
+          actionPromise === undefined &&
+          notification.message?.includes(
+            "browser_execution: Browser execution observation armed",
+          )
+        ) {
+          actionPromise = action.send("Runtime.evaluate", {
+            expression: "document.querySelector('#run').click()",
+          });
+          void actionPromise.catch(() => undefined);
+        }
+      },
+    },
+  );
+  assert.ok(actionPromise, "MCP did not emit an actual armed notification");
+  await actionPromise;
+  assert.notEqual(response.isError, true, mcpTextValue(response));
+  return assertExecution(
+    parseEvidence(JSON.parse(mcpTextValue(response)).evidence),
+    site,
+    requireBlock,
+  );
+}
+
+async function ready(connection) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const result = await connection.send("Runtime.evaluate", {
+      expression:
+        "typeof chosen === 'function' && typeof untouched === 'function'",
+      returnByValue: true,
+    });
+    if (result.result.value === true) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("Runtime fixture sources did not load");
+}
+
+async function executionCli(entrypoint, input, env, action) {
+  const child = spawn(
+    process.execPath,
+    [
+      entrypoint,
+      "observe-web-execution",
+      input.cdp_endpoint,
+      input.target_id,
+      "--observation-ms",
+      "300",
+      "--json",
+    ],
+    { env, stdio: ["ignore", "pipe", "pipe"] },
+  );
+  let stdout = "";
+  let stderr = "";
+  let actionPromise;
+  const timeout = setTimeout(() => child.kill("SIGTERM"), 40_000);
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+    if (actionPromise === undefined && stderr.includes('"completed":1')) {
+      actionPromise = action.send("Runtime.evaluate", {
+        expression: "document.querySelector('#run').click()",
+      });
+      void actionPromise.catch(() => undefined);
+    }
+  });
+  try {
+    const [code] = await once(child, "close");
+    assert.equal(code, 0, stderr);
+    assert.ok(actionPromise, "CLI did not report an actual armed point");
+    await actionPromise;
+    return stdout;
+  } finally {
+    clearTimeout(timeout);
+    if (child.exitCode === null && child.signalCode === null)
+      child.kill("SIGTERM");
+  }
+}
+
+function sourceByText(result, text) {
+  const source = result.sources.find(
+    (item) => item.source.state === "captured" && item.source.text === text,
+  );
+  assert.ok(source, "Exact independently known source text must be retained");
+  assert.equal(
+    source.source.sha256,
+    createHash("sha256").update(text).digest("hex"),
+  );
+  assert.equal(source.source.utf16_units, text.length);
+  assert.equal(source.source.utf8_bytes, Buffer.byteLength(text));
+  return source;
+}
+function assertListeners(evidence, site) {
+  const result = webEventListenersSchema.parse(evidence.normalized_result);
+  assert.equal(
+    result.listeners.length,
+    1,
+    "The selected node's child listener must not be attributed to the selected node",
+  );
+  assert.equal(result.listeners[0].type, "click");
+  assert.equal(result.listeners[0].passive, true);
+  const source = sourceByText(result, site.sources.selected);
+  assert.equal(result.listeners[0].location.script_id, source.script_id);
+  assert.equal(result.listeners[0].location.source_association, "script_id");
+  assert.equal(result.listeners[0].execution, "unknown");
+  return {
+    sha256: source.source.sha256,
+    line: result.listeners[0].location.line_number,
+    column: result.listeners[0].location.column_number,
+  };
+}
+function assertExecution(evidence, site, requireBlock = true) {
+  const result = webExecutionSchema.parse(evidence.normalized_result);
+  const selected = sourceByText(result, site.sources.selected);
+  const other = sourceByText(result, site.sources.other);
+  assert.equal(selected.url, other.url);
+  assert.notEqual(selected.script_id, other.script_id);
+  assert.ok(
+    selected.source.utf8_bytes > selected.source.utf16_units,
+    "Unicode oracle must distinguish UTF-8 bytes from UTF-16 units",
+  );
+  const coverage = result.coverage.scripts.find(
+    (script) => script.script_id === selected.script_id,
+  );
+  const fn = coverage?.functions.find((item) => item.name === "chosen");
+  assert.ok(
+    fn,
+    "Externally invoked callback must have precise function evidence",
+  );
+  assert.ok(fn.ranges.some((range) => range.count === 1));
+  if (requireBlock)
+    assert.equal(
+      fn.is_block_coverage,
+      true,
+      "Fresh fixture function must supply block granularity",
+    );
+  if (fn.is_block_coverage)
+    assert.ok(
+      fn.ranges.some((range) => range.count === 0),
+      `Unexecuted branch must remain zero within block coverage: ${JSON.stringify(fn)}`,
+    );
+  assert.equal(
+    fn.ranges[0].start_offset,
+    site.sources.selected.indexOf("function chosen"),
+    "Coverage offsets must index the retained UTF-16 source, including the astral prefix",
+  );
+  for (const range of fn.ranges) {
+    assert.equal(range.source_bounds, "verified");
+    assert.ok(range.end_offset <= selected.source.utf16_units);
+  }
+  const request = result.requests.find((item) =>
+    item.url.endsWith("/evidence?marker=chosen"),
+  );
+  assert.ok(request, "The selected request initiator must be retained");
+  assert.ok(
+    request.callsites.some(
+      (site) =>
+        site.script_id === selected.script_id &&
+        site.source_association === "script_id",
+    ),
+  );
+  assert.equal(request.causal_attribution, "unknown");
+  assert.equal(result.script_inventory.coverage_absence, "unknown");
+  assert.equal(result.instrumentation.cleanup, "confirmed");
+  return {
+    selected_sha256: selected.source.sha256,
+    other_sha256: other.source.sha256,
+    zero_branch: fn.is_block_coverage
+      ? "observed-zero"
+      : "unknown-function-only",
+    granularity: fn.is_block_coverage ? "block" : "function",
+    repeated_url_identity: true,
+    request_script_id: selected.script_id,
+  };
+}
+
+async function reloadFixture(connection) {
+  await connection.send("Page.enable");
+  let dispose;
+  const committed = new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("Fixture reload did not commit")),
+      5000,
+    );
+    const remove = connection.onEvent((event) => {
+      if (
+        event.method === "Page.frameNavigated" &&
+        !event.params.frame?.parentId
+      )
+        resolve();
+    });
+    dispose = () => {
+      clearTimeout(timer);
+      remove();
+    };
+  });
+  void committed.catch(() => undefined);
+  try {
+    await connection.send("Page.reload", { ignoreCache: true });
+    await committed;
+    await ready(connection);
+  } finally {
+    dispose();
+  }
+}

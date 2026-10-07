@@ -10,6 +10,11 @@ export interface FakeCdpBrowser {
   readonly browserWebSocketUrl: string;
   readonly allowedOrigin: string;
   readonly commands: readonly FakeCdpCommand[];
+  emitEvent(event: {
+    readonly method: string;
+    readonly params: unknown;
+    readonly sessionId?: string;
+  }): void;
   readonly httpRequests: readonly {
     readonly url: string;
     readonly authorization: string | undefined;
@@ -20,6 +25,23 @@ export interface FakeCdpBrowser {
 }
 
 export interface FakeOptions {
+  /** Producer reply seam preserves the real HTTP/WebSocket transport and command parser. */
+  readonly commandResult?: (
+    command: FakeCdpCommand,
+    origin: string,
+    frameReads: number,
+  ) => Readonly<Record<string, unknown>> | undefined;
+  /** Return undefined to use the stock producer events; an empty array suppresses them. */
+  readonly commandEvents?: (
+    command: FakeCdpCommand,
+    origin: string,
+  ) =>
+    | readonly {
+        readonly method: string;
+        readonly params: unknown;
+        readonly sessionId?: string;
+      }[]
+    | undefined;
   readonly malformedDiscovery?: boolean;
   readonly oversizedDiscovery?: boolean;
   readonly invalidBrowserWebSocket?: boolean;

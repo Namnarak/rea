@@ -1,0 +1,195 @@
+import { createHash } from "node:crypto";
+import { z } from "zod";
+import { AnalysisError } from "../../domain/analysisErrorBase.js";
+import { AnalysisOutputError } from "../../domain/analysisErrorCore.js";
+import {
+  WEB_RUNTIME_LIMITS,
+  type WebRuntimeSource,
+  type webRuntimeLocationSchema,
+} from "../../domain/webRuntime.js";
+import type { CdpEvent } from "../CdpConnection.js";
+import type { CdpRuntimeSession } from "./CdpRuntimeSession.js";
+import {
+  runtimeContextSchema,
+  runtimeScriptParsedSchema,
+} from "./CdpRuntimeProtocol.js";
+
+/** Source ownership is proven by execution context/frame metadata, independently of URL aliases. */
+export class CdpRuntimeSources {
+  readonly scripts = new Map<
+    string,
+    z.infer<typeof runtimeScriptParsedSchema>
+  >();
+  readonly #contexts = new Map<number, string>();
+  readonly #changed = new Set<string>();
+  readonly #sources = new Map<string, WebRuntimeSource>();
+  #retainedBytes = 0;
+  #sourceBytes = 0;
+  #failure: AnalysisError | undefined;
+  constructor(readonly session: CdpRuntimeSession) {}
+
+  /** Subscribe before enabling Debugger; existing uncollected scripts are replayed by the producer. */
+  ingest(event: CdpEvent): void {
+    if (
+      event.sessionId !== this.session.transport.sessionId ||
+      this.#failure !== undefined
+    )
+      return;
+    try {
+      if (event.method === "Runtime.executionContextCreated") {
+        this.#retainedBytes += Buffer.byteLength(JSON.stringify(event.params));
+        if (this.#retainedBytes > WEB_RUNTIME_LIMITS.retainedEventBytes)
+          throw new Error(
+            "Context/script metadata exceeds the complete 8 MiB event budget.",
+          );
+        const context = runtimeContextSchema.parse(event.params).context;
+        if (context.auxData?.frameId !== undefined)
+          this.#contexts.set(context.id, context.auxData.frameId);
+      } else if (event.method === "Debugger.scriptParsed") {
+        this.#retainedBytes += Buffer.byteLength(JSON.stringify(event.params));
+        if (this.#retainedBytes > WEB_RUNTIME_LIMITS.retainedEventBytes)
+          throw new Error(
+            "Script metadata exceeds the complete 8 MiB event budget.",
+          );
+        const script = runtimeScriptParsedSchema.parse(event.params);
+        const previous = this.scripts.get(script.scriptId);
+        if (
+          previous !== undefined &&
+          JSON.stringify(previous) !== JSON.stringify(script)
+        )
+          this.#changed.add(script.scriptId);
+        this.scripts.set(script.scriptId, script);
+      }
+    } catch (cause: unknown) {
+      this.#failure = new AnalysisOutputError(
+        this.session.operation,
+        cause instanceof Error ? cause.message : String(cause),
+      );
+    }
+  }
+
+  /** Producer parse/resource failures are surfaced outside the transport event callback. */
+  check(): void {
+    if (this.#failure !== undefined) throw this.#failure;
+  }
+
+  /** Only the selected page's main document contexts establish source ownership. */
+  belongsToDocument(scriptId: string): boolean {
+    const script = this.scripts.get(scriptId);
+    if (script === undefined || this.#changed.has(scriptId)) return false;
+    const reported = script.executionContextAuxData?.frameId;
+    const context = this.#contexts.get(script.executionContextId);
+    return (
+      (reported === undefined ||
+        context === undefined ||
+        reported === context) &&
+      (reported ?? context) === this.session.target.frame_id
+    );
+  }
+
+  /** Retain complete script text and compute a digest distinct from the producer hash. */
+  async read(scriptIds: Iterable<string>): Promise<WebRuntimeSource[]> {
+    this.check();
+    for (const scriptId of new Set(scriptIds)) {
+      if (this.#sources.has(scriptId)) continue;
+      const script = this.scripts.get(scriptId);
+      const owned = this.belongsToDocument(scriptId);
+      const item: WebRuntimeSource = {
+        script_id: scriptId,
+        url: owned ? (script?.url ?? "") : "",
+        execution_context_id: owned
+          ? (script?.executionContextId ?? null)
+          : null,
+        frame_id: owned ? this.session.target.frame_id : null,
+        producer_hash: owned ? (script?.hash ?? null) : null,
+        source_map_url: owned ? (script?.sourceMapURL ?? null) : null,
+        has_source_url: owned ? (script?.hasSourceURL ?? null) : null,
+        language: owned ? (script?.scriptLanguage ?? null) : null,
+        resource_start:
+          owned && script !== undefined
+            ? {
+                line_number: script.startLine,
+                column_number: script.startColumn,
+              }
+            : null,
+        source: {
+          state: "excluded",
+          reason: this.#changed.has(scriptId)
+            ? "The script changed identity during observation; source attribution is unknown."
+            : "Selected main-document context ownership was not established.",
+        },
+      };
+      if (owned && script?.scriptLanguage !== "WebAssembly")
+        item.source = await this.capture(scriptId);
+      else if (owned)
+        item.source = {
+          state: "excluded",
+          reason:
+            "WebAssembly bytecode is outside this JavaScript source operation.",
+        };
+      this.#sources.set(scriptId, item);
+    }
+    this.check();
+    return [...this.#sources.values()];
+  }
+
+  /** Resolve an exact producer script ID; URL equality is never an identity fallback. */
+  location(
+    scriptId: string,
+    url: string | null,
+    line: number,
+    column: number | null,
+    functionName: string | null = null,
+  ): z.infer<typeof webRuntimeLocationSchema> {
+    return {
+      script_id: scriptId,
+      url,
+      line_number: line,
+      column_number: column,
+      function_name: functionName,
+      source_association: this.belongsToDocument(scriptId)
+        ? "script_id"
+        : "unknown",
+    };
+  }
+
+  private async capture(scriptId: string): Promise<WebRuntimeSource["source"]> {
+    let raw: unknown;
+    try {
+      raw = await this.session.command("Debugger.getScriptSource", {
+        scriptId,
+      });
+    } catch (cause: unknown) {
+      if (
+        this.session.options.signal?.aborted ||
+        !(cause instanceof AnalysisError)
+      )
+        throw cause;
+      return {
+        state: "unavailable",
+        reason: cause.userMessage ?? cause.message,
+      };
+    }
+    const source = z.object({ scriptSource: z.string() }).safeParse(raw);
+    if (!source.success)
+      throw new AnalysisOutputError(
+        this.session.operation,
+        "Debugger.getScriptSource returned malformed source text.",
+      );
+    const text = source.data.scriptSource;
+    const bytes = Buffer.byteLength(text);
+    this.#sourceBytes += bytes;
+    if (this.#sourceBytes > WEB_RUNTIME_LIMITS.sourceBytes)
+      throw new AnalysisOutputError(
+        this.session.operation,
+        "Complete runtime source evidence exceeds its 32 MiB budget; no partial evidence is returned.",
+      );
+    return {
+      state: "captured",
+      text,
+      sha256: createHash("sha256").update(text).digest("hex"),
+      utf8_bytes: bytes,
+      utf16_units: text.length,
+    };
+  }
+}
