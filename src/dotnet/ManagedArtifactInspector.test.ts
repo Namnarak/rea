@@ -93,6 +93,27 @@ describe("managed artifact inventory", () => {
     expect(result.coverage.issues).toEqual([]);
   });
 
+  it("preserves duplicate AssemblyRef rows in metadata order", () => {
+    const bytes = buildManagedPeFixture({
+      references: [
+        "UnityEngine.CoreModule",
+        "UnityEngine.CoreModule",
+        "System.Runtime",
+      ],
+    });
+    const result = inspectManagedArtifactBytes(
+      bytes,
+      managedPeFixtureTarget(bytes),
+    );
+
+    expect(result.references.map(({ name }) => name)).toEqual([
+      "UnityEngine.CoreModule",
+      "UnityEngine.CoreModule",
+      "System.Runtime",
+    ]);
+    expect(result.classification.runtime_family).toBe("unity-mono");
+  });
+
   it("accepts CLI metadata GUIDs without RFC UUID version or variant bits", () => {
     const bytes = buildManagedPeFixture({
       mvid: Buffer.from("3aebc60edc4a544b1f458b4ed40b33b1", "hex"),

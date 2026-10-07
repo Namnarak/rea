@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import { createHash } from "node:crypto";
+
+import { inspectManagedArtifactBytes } from "./ManagedArtifactInspector.js";
 import { inspectManagedMembersBytes } from "./ManagedMemberInspector.js";
 import { inspectManagedNativeBoundariesBytes } from "./ManagedNativeBoundaryInspector.js";
 import {
@@ -155,6 +158,37 @@ describe("managed native boundaries", () => {
     });
     expect(result.limitations).toContainEqual(
       expect.stringContaining("CLI header was not admitted"),
+    );
+  });
+});
+
+describe("managed PE fixture layout", () => {
+  it("keeps ReadyToRun metadata separate from expanded metadata and resources", () => {
+    const resourceData = Buffer.alloc(64 * 1024, 0x5a);
+    const bytes = buildManagedPeFixture({
+      readyToRun: true,
+      references: Array.from(
+        { length: 2_200 },
+        (_, index) => `Reference.${String(index).padStart(4, "0")}`,
+      ),
+      resourceData,
+    });
+    const target = managedPeFixtureTarget(bytes);
+    const artifact = inspectManagedArtifactBytes(bytes, target);
+    const boundaries = inspectManagedNativeBoundariesBytes(bytes, target);
+
+    expect(artifact.coverage).toMatchObject({ state: "complete", issues: [] });
+    expect(artifact.references).toHaveLength(2_200);
+    expect(artifact.resources[0]).toMatchObject({
+      data_length: resourceData.length,
+      data_sha256: createHash("sha256").update(resourceData).digest("hex"),
+    });
+    expect(boundaries.cli_native).toMatchObject({
+      ready_to_run_signature: true,
+      managed_native_header_size: 4,
+    });
+    expect(boundaries.cli_native.managed_native_header_rva).toBeGreaterThan(
+      0x2700,
     );
   });
 });

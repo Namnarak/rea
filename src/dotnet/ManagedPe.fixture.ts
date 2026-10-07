@@ -8,6 +8,8 @@ interface ManagedPeFixtureOptions {
   readonly fieldName?: string;
   readonly fieldSignature?: Buffer;
   readonly ilBody?: Buffer;
+  readonly malformedAssemblyReferenceRows?: readonly number[];
+  readonly malformedCustomAttributeRows?: readonly number[];
   readonly metadataValidMaskExtra?: bigint;
   readonly methodName?: string;
   readonly methodSignature?: Buffer;
@@ -184,7 +186,11 @@ const assemblyRow = (name: number): Buffer =>
     u16(0),
   ]);
 
-const assemblyRefRow = (name: number, keyOrToken: number): Buffer =>
+const assemblyRefRow = (
+  name: number,
+  keyOrToken: number,
+  malformedName: boolean,
+): Buffer =>
   Buffer.concat([
     u16(8),
     u16(0),
@@ -192,13 +198,27 @@ const assemblyRefRow = (name: number, keyOrToken: number): Buffer =>
     u16(0),
     u32(0),
     u16(keyOrToken),
-    u16(name),
+    u16(malformedName ? 0xffff : name),
     u16(0),
     u16(0),
   ]);
 
-const customAttributeRow = (value: number): Buffer =>
-  Buffer.concat([u16((1 << 5) | 14), u16((1 << 3) | 3), u16(value)]);
+const customAttributeParentIndexSize = (
+  assemblyReferenceCount: number,
+): 2 | 4 => (assemblyReferenceCount >= 0x0800 ? 4 : 2);
+
+const customAttributeRow = (
+  value: number,
+  malformedParent: boolean,
+  parentIndexSize: 2 | 4,
+): Buffer =>
+  Buffer.concat([
+    parentIndexSize === 2
+      ? u16(malformedParent ? 0xffff : (1 << 5) | 14)
+      : u32(malformedParent ? 0xffff_ffff : (1 << 5) | 14),
+    u16((1 << 3) | 3),
+    u16(value),
+  ]);
 
 const manifestResourceRow = (name: number): Buffer =>
   Buffer.concat([u32(0), u32(2), u16(name), u16(0)]);
@@ -320,6 +340,9 @@ const buildManagedFixtureMetadata = (
   const referenceStringIndexes = referenceNames.map((name) =>
     strings.add(name),
   );
+  const parentIndexSize = customAttributeParentIndexSize(
+    referenceStringIndexes.length,
+  );
   const tokenBlob = blobs.add(Buffer.from("b77a5c561934e089", "hex"));
   const fieldSignature = blobs.add(
     options.fieldSignature ?? Buffer.from([0x06, 0x08]),
@@ -350,7 +373,16 @@ const buildManagedFixtureMetadata = (
       ],
     ],
     [10, [memberRefRow(constructorName, constructorSignature)]],
-    [12, [customAttributeRow(attributeBlob)]],
+    [
+      12,
+      [
+        customAttributeRow(
+          attributeBlob,
+          options.malformedCustomAttributeRows?.includes(1) ?? false,
+          parentIndexSize,
+        ),
+      ],
+    ],
     ...(pinvokeModuleName === null
       ? []
       : ([[26, [moduleRefRow(pinvokeModuleName)]]] as const)),
@@ -369,7 +401,16 @@ const buildManagedFixtureMetadata = (
           ],
         ] as const)),
     [32, [assemblyRow(assemblyName)]],
-    [35, referenceStringIndexes.map((name) => assemblyRefRow(name, tokenBlob))],
+    [
+      35,
+      referenceStringIndexes.map((name, index) =>
+        assemblyRefRow(
+          name,
+          tokenBlob,
+          options.malformedAssemblyReferenceRows?.includes(index + 1) ?? false,
+        ),
+      ),
+    ],
     [40, [manifestResourceRow(resourceName)]],
   ]);
   const metadata = metadataRoot(
@@ -403,14 +444,36 @@ const buildManagedFixtureImage = (
   );
   const methodRva = 0x2000 + bodyOffset - 0x0200;
   const metadata = buildMetadata(methodRva);
+  const body =
+    options.ilBody ??
+    Buffer.from([
+      0x32, 0x02, 0x7b, 0x01, 0x00, 0x00, 0x04, 0x28, 0x01, 0x00, 0x00, 0x0a,
+      0x2a,
+    ]);
+  const legacyReadyToRunOffset = 0x0900;
+  const metadataEnd = 0x0300 + metadata.length;
+  const resourceEnd = resourceOffset + resourceDirectory.length;
+  const bodyEnd = bodyOffset + body.length;
+  const overlapsReadyToRun = (start: number, end: number): boolean =>
+    legacyReadyToRunOffset < end && legacyReadyToRunOffset + 4 > start;
+  const readyToRunOffset =
+    options.readyToRun === true
+      ? overlapsReadyToRun(0x0300, metadataEnd) ||
+        overlapsReadyToRun(resourceOffset, resourceEnd) ||
+        overlapsReadyToRun(bodyOffset, bodyEnd)
+        ? Math.ceil(Math.max(metadataEnd, resourceEnd, bodyEnd) / 4) * 4
+        : legacyReadyToRunOffset
+      : null;
   const rawSectionSize =
     Math.ceil(
       Math.max(
         0x0e00,
         0x0100 + metadata.length,
-        bodyOffset - 0x0200 + (options.ilBody?.length ?? 13),
+        bodyOffset - 0x0200 + body.length,
+        readyToRunOffset === null ? 0 : readyToRunOffset - 0x0200 + 4,
       ) / 0x0200,
     ) * 0x0200;
+  const virtualSectionSize = Math.max(0x1000, rawSectionSize);
   const image = Buffer.alloc(0x0200 + rawSectionSize);
   image.write("MZ", 0, "ascii");
   image.writeUInt32LE(0x80, 0x3c);
@@ -427,7 +490,7 @@ const buildManagedFixtureImage = (
   image.writeUInt32LE(0x1000, optional + 32);
   image.writeUInt32LE(0x200, optional + 36);
   image.writeUInt32LE(
-    Math.ceil((0x2000 + rawSectionSize) / 0x1000) * 0x1000,
+    Math.ceil((0x2000 + virtualSectionSize) / 0x1000) * 0x1000,
     optional + 56,
   );
   image.writeUInt32LE(0x200, optional + 60);
@@ -436,7 +499,7 @@ const buildManagedFixtureImage = (
   image.writeUInt32LE(72, optional + 96 + 14 * 8 + 4);
   const section = optional + 0x00e0;
   image.write(".text\0\0\0", section, "ascii");
-  image.writeUInt32LE(rawSectionSize, section + 8);
+  image.writeUInt32LE(virtualSectionSize, section + 8);
   image.writeUInt32LE(0x2000, section + 12);
   image.writeUInt32LE(rawSectionSize, section + 16);
   image.writeUInt32LE(0x0200, section + 20);
@@ -451,18 +514,12 @@ const buildManagedFixtureImage = (
   image.writeUInt32LE(0x0600_0001, cli + 20);
   image.writeUInt32LE(resourceRva, cli + 24);
   image.writeUInt32LE(resourceDirectory.length, cli + 28);
-  if (options.readyToRun === true) {
-    image.writeUInt32LE(0x2700, cli + 64);
+  if (readyToRunOffset !== null) {
+    image.writeUInt32LE(0x2000 + readyToRunOffset - 0x0200, cli + 64);
     image.writeUInt32LE(4, cli + 68);
-    image.write("RTR\0", 0x0900, "ascii");
+    image.write("RTR\0", readyToRunOffset, "ascii");
   }
-  (
-    options.ilBody ??
-    Buffer.from([
-      0x32, 0x02, 0x7b, 0x01, 0x00, 0x00, 0x04, 0x28, 0x01, 0x00, 0x00, 0x0a,
-      0x2a,
-    ])
-  ).copy(image, bodyOffset);
+  body.copy(image, bodyOffset);
   metadata.copy(image, 0x0300);
   resourceDirectory.copy(image, resourceOffset);
   return image;
