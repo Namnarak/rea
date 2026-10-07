@@ -26,7 +26,11 @@ The coverage counter interval starts at backend acceptance before the armed rece
 
 A document replacement ends the window; final coverage then remains unavailable. Missing coverage is unknown: an already loaded script may be absent from a sample. A detailed request also does not guarantee block granularity for already compiled functions. If `is_block_coverage` is false, the function-only ranges are observed and branch execution remains unknown. Native Chrome verification reproduced block coverage in the first window and function-only coverage in a subsequent window, including without REA.
 
+Same-document navigation such as `history.pushState()` remains valid when the frame and known loader identity stay stable and the current origin is allowed. Unknown loader identity retains a conservative URL check; newly reported or replaced loaders are rejected. Malformed producer events end an armed window immediately and trigger cleanup, independently of the selected duration.
+
 Child frames, workers, service workers, WebAssembly, chronological execution order and framework-specific causal interpretation are outside this operation. Script ownership comes from frame/context metadata, never URL equality. Repeated URLs and synthetic names therefore retain separate identities.
+
+Observed script metadata remains available when ownership is unknown; source text and source association remain excluded or unknown. Request/initiator resource URLs omit transport userinfo. Stack and script URLs can also be inert `sourceURL` names: REA preserves declared names and unknown representations, and only removes script URL userinfo when stable producer metadata explicitly reports `hasSourceURL: false`. This policy also applies when metadata arrives after a request. Unknown producer extension fields and source-map declarations are preserved.
 
 ## Inspect a node's listeners
 
@@ -42,7 +46,7 @@ The result contains directly registered listener types/flags, callback coordinat
 
 Each protocol message has a 64 MiB budget; script/context metadata and request metadata each have an 8 MiB retained budget. Complete retained source text has a 32 MiB budget. Oversized or malformed evidence returns no partial successful result. Each command and the complete inspection/source-join phase have a 20-second deadline; cleanup has a separate 5-second command deadline plus transport closure. The selected observation duration must fit the host timer's positive 32-bit millisecond range. REA does not control the externally owned browser's CPU or memory.
 
-`npm run verify:browser:runtime` uses caller-supplied `REA_BROWSER_EXECUTABLE` and the native `ps` command on Linux/macOS against an owned synthetic fixture, through real public CLI and stdio MCP. It checks exact Unicode/CRLF text/digests, same-URL identities, executed and zero-count branches, function-only unknowns on repeated observation, listener selection, initiator association, actual arming and preservation of the external page. The optional positional entrypoint to `scripts/verify-browser-runtime.mjs` permits the same checks against an isolated installed tarball.
+`npm run verify:browser:runtime` uses caller-supplied `REA_BROWSER_EXECUTABLE` and the native `ps` command on Linux/macOS against an owned synthetic fixture, through real public CLI and stdio MCP. It checks exact Unicode/CRLF text/digests, same-URL identities, same-document navigation, inert declared names, executed and zero-count branches, function-only unknowns on repeated observation, listener selection, initiator association, actual arming and preservation of the external page. The optional positional entrypoint to `scripts/verify-browser-runtime.mjs` permits the same checks against an isolated installed tarball.
 
 Real workflow coverage is Linux x64 / Chrome 153 / Node 24. Other browser engines and host workflows remain unverified. The conditional `real-web-runtime` CI lane acquires Chrome only for relevant changes; ordinary unit/static checks need no browser.
 

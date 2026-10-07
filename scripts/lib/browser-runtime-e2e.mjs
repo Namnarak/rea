@@ -124,6 +124,14 @@ export async function verifyBrowserRuntime(
       true,
       "REA must preserve the externally owned page",
     );
+    const location = await action.send("Runtime.evaluate", {
+      expression: "location.href",
+      returnByValue: true,
+    });
+    assert.equal(
+      location.result.value,
+      `${site.origin}/same-document?caller=value#fragment`,
+    );
     return {
       product: target,
       cli: cliProof,
@@ -276,6 +284,11 @@ function assertExecution(evidence, site, requireBlock = true) {
   const selected = sourceByText(result, site.sources.selected);
   const other = sourceByText(result, site.sources.other);
   assert.equal(selected.url, other.url);
+  assert.equal(selected.has_source_url, true);
+  assert.equal(
+    selected.url,
+    `${site.origin.replace("http://", "http://declared:label@")}/same.js`,
+  );
   assert.notEqual(selected.script_id, other.script_id);
   assert.ok(
     selected.source.utf8_bytes > selected.source.utf16_units,
@@ -322,6 +335,12 @@ function assertExecution(evidence, site, requireBlock = true) {
     ),
   );
   assert.equal(request.causal_attribution, "unknown");
+  assert.ok(
+    request.callsites.some(
+      (site) =>
+        site.script_id === selected.script_id && site.url === selected.url,
+    ),
+  );
   assert.equal(result.script_inventory.coverage_absence, "unknown");
   assert.equal(result.instrumentation.cleanup, "confirmed");
   return {
@@ -332,6 +351,8 @@ function assertExecution(evidence, site, requireBlock = true) {
       : "unknown-function-only",
     granularity: fn.is_block_coverage ? "block" : "function",
     repeated_url_identity: true,
+    same_document_navigation: true,
+    declared_source_url_preserved: true,
     request_script_id: selected.script_id,
   };
 }

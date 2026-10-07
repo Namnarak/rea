@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AnalysisError } from "../../domain/analysisErrorBase.js";
 import {
   AnalysisCancelledError,
   AnalysisOutputError,
@@ -23,8 +24,18 @@ export const captureWebExecution = async (
   const requests = new CdpRuntimeRequests(sources);
   const unsubscribe = session.transport.connection.onEvent((event) => {
     if (event.sessionId !== session.transport.sessionId) return;
-    if (window.reason === undefined) sources.ingest(event);
-    if (window.active) requests.ingest(event);
+    try {
+      if (window.reason === undefined) sources.ingest(event);
+      if (window.active) requests.ingest(event);
+      sources.check();
+      requests.check();
+    } catch (cause: unknown) {
+      window.fail(
+        cause instanceof AnalysisError
+          ? cause
+          : new AnalysisOutputError(session.operation, String(cause)),
+      );
+    }
     window.ingest(event);
   });
   const disconnected = session.transport.connection.onDisconnect(() =>

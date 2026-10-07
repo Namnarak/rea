@@ -5,8 +5,8 @@ export async function startBrowserRuntimeSite() {
   let origin;
   let evidenceRequests = 0;
   const sources = () => ({
-    selected: `// 🔥 UTF-16 prefix\r\nfunction chosen() {\r\n  fetch('/evidence?marker=chosen');\r\n  if (document.body.dataset.branch === 'unused') { fetch('/never'); }\r\n}\r\ndocument.querySelector('#run').addEventListener('click', chosen, { passive: true });\r\n//# sourceURL=${origin}/same.js\r\n`,
-    other: `function untouched() { return 'other source'; }\r\ndocument.querySelector('#child').addEventListener('click', untouched);\r\n//# sourceURL=${origin}/same.js\r\n`,
+    selected: `// 🔥 UTF-16 prefix\r\nfunction chosen() {\r\n  history.pushState({}, '', '/same-document?caller=value#fragment');\r\n  fetch('/evidence?marker=chosen');\r\n  if (document.body.dataset.branch === 'unused') { fetch('/never'); }\r\n}\r\ndocument.querySelector('#run').addEventListener('click', chosen, { passive: true });\r\n//# sourceURL=${origin.replace("http://", "http://declared:label@")}/same.js\r\n`,
+    other: `function untouched() { return 'other source'; }\r\ndocument.querySelector('#child').addEventListener('click', untouched);\r\n//# sourceURL=${origin.replace("http://", "http://declared:label@")}/same.js\r\n`,
   });
   const server = createServer((request, response) => {
     response.setHeader("content-type", "text/html; charset=utf-8");

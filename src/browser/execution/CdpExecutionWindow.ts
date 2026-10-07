@@ -1,4 +1,5 @@
 import { AnalysisCancelledError } from "../../domain/analysisErrorCore.js";
+import type { AnalysisError } from "../../domain/analysisErrorBase.js";
 import type { WebExecution } from "../../domain/webExecution.js";
 import type { CdpEvent } from "../CdpConnection.js";
 import type { CdpRuntimeSession } from "./CdpRuntimeSession.js";
@@ -11,7 +12,8 @@ export class CdpExecutionWindow {
   reason: EndReason | undefined;
   #timer: NodeJS.Timeout | undefined;
   #resolve: ((reason: EndReason) => void) | undefined;
-  #reject: ((error: AnalysisCancelledError) => void) | undefined;
+  #reject: ((error: AnalysisError) => void) | undefined;
+  #failure: AnalysisError | undefined;
   #removeAbort: (() => void) | undefined;
   constructor(
     readonly session: Pick<CdpRuntimeSession, "operation" | "options"> & {
@@ -55,6 +57,7 @@ export class CdpExecutionWindow {
   /** The timer starts at arming, before progress delivery can delay the external action. */
   start(duration: number): Promise<EndReason> {
     this.armedAt = new Date().toISOString();
+    if (this.#failure !== undefined) return Promise.reject(this.#failure);
     if (this.reason !== undefined) return Promise.resolve(this.reason);
     return new Promise((resolve, reject) => {
       this.#resolve = resolve;
@@ -74,11 +77,19 @@ export class CdpExecutionWindow {
 
   /** Transport loss ends the window; instrumentation cleanup still requires confirmation. */
   end(reason: EndReason): void {
-    if (this.reason !== undefined) return;
+    if (this.reason !== undefined || this.#failure !== undefined) return;
     this.reason = reason;
     this.endedAt = new Date().toISOString();
     this.dispose();
     this.#resolve?.(reason);
+  }
+  /** Invalid producer data ends instrumentation immediately with its original failure. */
+  fail(error: AnalysisError): void {
+    if (this.reason !== undefined || this.#failure !== undefined) return;
+    this.#failure = error;
+    this.endedAt = new Date().toISOString();
+    this.dispose();
+    this.#reject?.(error);
   }
   /** Release local timer and abort listener on every setup/failure path. */
   dispose(): void {

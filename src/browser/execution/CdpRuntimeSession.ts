@@ -152,13 +152,18 @@ export class CdpRuntimeSession {
     const frame = runtimeFrameTreeSchema.parse(
       await this.command("Page.getFrameTree"),
     ).frameTree.frame;
+    const url = sanitizeBrowserUrl(frame.url);
     if (
       frame.id !== this.target.frame_id ||
-      sanitizeBrowserUrl(frame.url).url !== this.target.initial_url ||
-      (frame.loaderId ?? null) !== this.target.loader_id
+      (frame.loaderId ?? null) !== this.target.loader_id ||
+      (this.target.loader_id === null && url.url !== this.target.initial_url)
     )
       throw new BrowserObservationError(this.operation, "target_changed", {
         detail: `Selected target ${this.target.target_id} changed document during ${this.operation}.`,
+      });
+    if (url.origin === null || !this.allowedOrigins.has(url.origin))
+      throw new BrowserObservationError(this.operation, "target_not_allowed", {
+        detail: `Selected target ${this.target.target_id} moved to an unselected origin during ${this.operation}.`,
       });
   }
 

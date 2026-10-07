@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { AnalysisError } from "../../domain/analysisErrorBase.js";
 import { AnalysisOutputError } from "../../domain/analysisErrorCore.js";
+import { sanitizeBrowserUrl } from "../../domain/browserObservation.js";
 import {
   WEB_RUNTIME_LIMITS,
   type WebRuntimeSource,
@@ -96,17 +97,15 @@ export class CdpRuntimeSources {
       const owned = this.belongsToDocument(scriptId);
       const item: WebRuntimeSource = {
         script_id: scriptId,
-        url: owned ? (script?.url ?? "") : "",
-        execution_context_id: owned
-          ? (script?.executionContextId ?? null)
-          : null,
+        url: this.sourceUrl(scriptId, script?.url ?? ""),
+        execution_context_id: script?.executionContextId ?? null,
         frame_id: owned ? this.session.target.frame_id : null,
-        producer_hash: owned ? (script?.hash ?? null) : null,
-        source_map_url: owned ? (script?.sourceMapURL ?? null) : null,
-        has_source_url: owned ? (script?.hasSourceURL ?? null) : null,
-        language: owned ? (script?.scriptLanguage ?? null) : null,
+        producer_hash: script?.hash ?? null,
+        source_map_url: script?.sourceMapURL ?? null,
+        has_source_url: script?.hasSourceURL ?? null,
+        language: script?.scriptLanguage ?? null,
         resource_start:
-          owned && script !== undefined
+          script !== undefined
             ? {
                 line_number: script.startLine,
                 column_number: script.startColumn,
@@ -143,7 +142,7 @@ export class CdpRuntimeSources {
   ): z.infer<typeof webRuntimeLocationSchema> {
     return {
       script_id: scriptId,
-      url,
+      url: url === null ? null : this.sourceUrl(scriptId, url),
       line_number: line,
       column_number: column,
       function_name: functionName,
@@ -151,6 +150,14 @@ export class CdpRuntimeSources {
         ? "script_id"
         : "unknown",
     };
+  }
+
+  /** Declared script names are inert evidence; known resource URLs omit transport userinfo. */
+  sourceUrl(scriptId: string, url: string): string {
+    return !this.#changed.has(scriptId) &&
+      this.scripts.get(scriptId)?.hasSourceURL === false
+      ? sanitizeBrowserUrl(url).url
+      : url;
   }
 
   private async capture(scriptId: string): Promise<WebRuntimeSource["source"]> {

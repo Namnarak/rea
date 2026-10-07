@@ -9,6 +9,7 @@ import {
   runtimeStackSchema,
 } from "./CdpRuntimeProtocol.js";
 import type { CdpRuntimeSources } from "./CdpRuntimeSources.js";
+import { sanitizeRuntimeInitiator } from "./CdpRuntimeInitiator.js";
 
 /** Join producer initiators by script ID while preserving unresolved async parent identities. */
 export class CdpRuntimeRequests {
@@ -70,7 +71,7 @@ export class CdpRuntimeRequests {
         callsites.push(
           this.sources.location(
             "",
-            request.initiator.url,
+            sanitizeBrowserUrl(request.initiator.url).url,
             request.initiator.lineNumber,
             request.initiator.columnNumber ?? null,
           ),
@@ -81,7 +82,10 @@ export class CdpRuntimeRequests {
         method: request.request.method,
         timestamp_seconds: request.timestamp,
         initiator_type: request.initiator.type,
-        reported_initiator: jsonObjectSchema.parse(request.initiator),
+        reported_initiator: sanitizeRuntimeInitiator(
+          jsonObjectSchema.parse(request.initiator),
+          this.sources,
+        ),
         callsites,
         async_parent_ids: parents,
         causal_attribution: "unknown",
@@ -99,6 +103,10 @@ export class CdpRuntimeRequests {
     this.check();
     return this.items.map((request) => ({
       ...request,
+      reported_initiator: sanitizeRuntimeInitiator(
+        jsonObjectSchema.parse(request.reported_initiator),
+        this.sources,
+      ),
       callsites: request.callsites.map((site) =>
         this.sources.location(
           site.script_id,
