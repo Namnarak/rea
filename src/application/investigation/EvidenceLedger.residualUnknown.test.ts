@@ -99,6 +99,39 @@ describe("residual unknown registry reads and identity", () => {
     });
   });
 
+  it("imports a valid dependency chain deeper than the JavaScript call stack", () => {
+    const records = [];
+    const unknowns: ResidualUnknown[] = [];
+    let previousId: string | undefined;
+    for (let index = 0; index < 10_000; index += 1) {
+      const mutationEvidence = mutation(`deep-chain-${index}`);
+      records.push(mutationEvidence);
+      const relationships =
+        previousId === undefined
+          ? []
+          : [{ type: "depends-on" as const, unknown_id: previousId }];
+      const unknown = createResidualUnknown(
+        input(`Does chain item ${index} meet the expected state?`, {
+          domain: "chain-profile",
+          required_authority: null,
+          relationships,
+        }),
+        mutationEvidence.evidence_id,
+        null,
+      );
+      unknowns.push(unknown);
+      previousId = unknown.unknown_id;
+    }
+    const bundle = createEvidenceBundle(records, unknowns);
+    const store = ledger();
+
+    expect(store.import(bundle)).toEqual({
+      ok: true,
+      value: { recordsAdded: 10_000, unknownsAdded: 10_000, changed: true },
+    });
+    expect(store.export()).toEqual(bundle);
+  });
+
   it("returns detached unknowns and evidence bundles from every read surface", () => {
     const store = ledger();
     expect(store.record(evidence("detached-record")).ok).toBe(true);
