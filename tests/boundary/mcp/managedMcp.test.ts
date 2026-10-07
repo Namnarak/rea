@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import type { CallToolResult } from "@modelcontextprotocol/server";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import { expect, it } from "vitest";
 import { z } from "zod";
 
@@ -14,6 +15,7 @@ import type { BinarySession } from "../../../src/application/binary/BinarySessio
 import type { BinaryTarget } from "../../../src/domain/binaryTarget.js";
 import { SessionProviderRouter } from "../../../src/application/binary/SessionProviderRouter.js";
 import { MANAGED_NATIVE_VERIFICATION_EXAMPLE } from "../../../src/contracts/managed/managedWorkflowExamples.js";
+import { toolContract } from "../../../src/contracts/toolContracts.js";
 import { ManagedStaticProvider } from "../../../src/dotnet/ManagedStaticProvider.js";
 import { createServer } from "../../../src/server/createServer.js";
 import { buildManagedPeFixture } from "../../../src/dotnet/ManagedPe.fixture.js";
@@ -166,6 +168,11 @@ const verifyManagedCatalogAndNativeWorkflow = async (
       },
     }),
   );
+  await assertAdvertisedOutput(
+    client,
+    "verify_managed_native_boundaries",
+    verified,
+  );
   expect(verified).toMatchObject({
     evidence_id: expect.stringMatching(/^ev_[a-f0-9]{64}$/u),
     result: {
@@ -202,6 +209,7 @@ const inspectManagedStaticWorkflow = async (
       arguments: { path },
     }),
   );
+  await assertAdvertisedOutput(client, "inspect_managed_artifact", inspected);
   expect(inspected).toMatchObject({
     result: {
       classification: { status: "managed", runtime_family: "modern-dotnet" },
@@ -221,6 +229,11 @@ const inspectManagedStaticWorkflow = async (
       }),
     ),
   );
+  await assertAdvertisedOutput(client, "inspect_managed_members", {
+    result: members.normalized_result,
+    evidence_id: members.evidence_id,
+    evidence: members,
+  });
   expect(members).toMatchObject({
     operation: "inspect_managed_members",
     provider: { id: "rea-dotnet-static" },
@@ -241,6 +254,11 @@ const inspectManagedStaticWorkflow = async (
       name: "inspect_managed_native_boundaries",
       arguments: { path },
     }),
+  );
+  await assertAdvertisedOutput(
+    client,
+    "inspect_managed_native_boundaries",
+    boundaries,
   );
   expect(boundaries).toMatchObject({
     result: {
@@ -316,6 +334,11 @@ const verifyManagedComparisonAndReconstruction = async (
       }),
     ),
   );
+  await assertAdvertisedOutput(client, "compare_managed_members", {
+    result: compared.normalized_result,
+    evidence_id: compared.evidence_id,
+    evidence: compared,
+  });
   expect(compared).toMatchObject({
     operation: "compare_managed_members",
     provider: { id: "rea-dotnet-workflows" },
@@ -392,6 +415,25 @@ const structured = (result: CallToolResult): Record<string, unknown> => {
   )
     throw new Error("missing structured result");
   return z.record(z.string(), z.unknown()).parse(result.structuredContent);
+};
+
+const assertAdvertisedOutput = async (
+  client: Client,
+  name: Parameters<typeof toolContract>[0],
+  output: Record<string, unknown>,
+): Promise<void> => {
+  const contract = toolContract(name);
+  const wire = (await client.listTools()).tools.find(
+    (tool) => tool.name === name,
+  );
+  if (wire?.outputSchema === undefined)
+    throw new Error(`Missing advertised output schema for ${name}`);
+  const valid = new Ajv2020({
+    strict: false,
+    validateFormats: false,
+  }).compile(z.record(z.string(), z.unknown()).parse(wire.outputSchema));
+  expect(valid(output), `${name} advertised output`).toBe(true);
+  expect(contract.outputSchema.safeParse(output).success).toBe(true);
 };
 
 const inlineEvidence = (
