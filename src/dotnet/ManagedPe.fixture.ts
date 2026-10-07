@@ -294,6 +294,7 @@ const tablesStream = (
 
 const buildManagedFixtureMetadata = (
   options: ManagedPeFixtureOptions,
+  methodRva: number,
 ): Buffer => {
   const strings = new StringHeap();
   const blobs = new BlobHeap();
@@ -343,7 +344,7 @@ const buildManagedFixtureMetadata = (
         methodDefRow({
           name: methodName,
           signature: methodSignature,
-          rva: 0x2800,
+          rva: methodRva,
           flags: options.pinvoke === undefined ? 0x0016 : 0x2016,
         }),
       ],
@@ -383,14 +384,34 @@ const buildManagedFixtureMetadata = (
 
 const buildManagedFixtureImage = (
   options: ManagedPeFixtureOptions,
-  metadata: Buffer,
+  buildMetadata: (methodRva: number) => Buffer,
 ): Buffer => {
   const resourceData = options.resourceData ?? Buffer.from("resource-data");
   const resourceDirectory = Buffer.concat([
     u32(resourceData.length),
     resourceData,
   ]);
-  const image = Buffer.alloc(0x1000);
+  const initialMetadata = buildMetadata(0);
+  const resourceOffset = Math.max(
+    0x0800,
+    Math.ceil((0x0300 + initialMetadata.length) / 0x0200) * 0x0200,
+  );
+  const resourceRva = 0x2000 + resourceOffset - 0x0200;
+  const bodyOffset = Math.max(
+    0x0a00,
+    Math.ceil((resourceOffset + resourceDirectory.length) / 0x0200) * 0x0200,
+  );
+  const methodRva = 0x2000 + bodyOffset - 0x0200;
+  const metadata = buildMetadata(methodRva);
+  const rawSectionSize =
+    Math.ceil(
+      Math.max(
+        0x0e00,
+        0x0100 + metadata.length,
+        bodyOffset - 0x0200 + (options.ilBody?.length ?? 13),
+      ) / 0x0200,
+    ) * 0x0200;
+  const image = Buffer.alloc(0x0200 + rawSectionSize);
   image.write("MZ", 0, "ascii");
   image.writeUInt32LE(0x80, 0x3c);
   image.writeUInt32LE(0x0000_4550, 0x80);
@@ -405,16 +426,19 @@ const buildManagedFixtureImage = (
   image.writeUInt32LE(0x0040_0000, optional + 28);
   image.writeUInt32LE(0x1000, optional + 32);
   image.writeUInt32LE(0x200, optional + 36);
-  image.writeUInt32LE(0x3000, optional + 56);
+  image.writeUInt32LE(
+    Math.ceil((0x2000 + rawSectionSize) / 0x1000) * 0x1000,
+    optional + 56,
+  );
   image.writeUInt32LE(0x200, optional + 60);
   image.writeUInt32LE(16, optional + 92);
   image.writeUInt32LE(0x2000, optional + 96 + 14 * 8);
   image.writeUInt32LE(72, optional + 96 + 14 * 8 + 4);
   const section = optional + 0x00e0;
   image.write(".text\0\0\0", section, "ascii");
-  image.writeUInt32LE(0x1000, section + 8);
+  image.writeUInt32LE(rawSectionSize, section + 8);
   image.writeUInt32LE(0x2000, section + 12);
-  image.writeUInt32LE(0x0e00, section + 16);
+  image.writeUInt32LE(rawSectionSize, section + 16);
   image.writeUInt32LE(0x0200, section + 20);
   image.writeUInt32LE(0x6000_0020, section + 36);
   const cli = 0x0200;
@@ -425,7 +449,7 @@ const buildManagedFixtureImage = (
   image.writeUInt32LE(metadata.length, cli + 12);
   image.writeUInt32LE(options.cliFlags ?? 1, cli + 16);
   image.writeUInt32LE(0x0600_0001, cli + 20);
-  image.writeUInt32LE(0x2600, cli + 24);
+  image.writeUInt32LE(resourceRva, cli + 24);
   image.writeUInt32LE(resourceDirectory.length, cli + 28);
   if (options.readyToRun === true) {
     image.writeUInt32LE(0x2700, cli + 64);
@@ -438,9 +462,9 @@ const buildManagedFixtureImage = (
       0x32, 0x02, 0x7b, 0x01, 0x00, 0x00, 0x04, 0x28, 0x01, 0x00, 0x00, 0x0a,
       0x2a,
     ])
-  ).copy(image, 0x0a00);
+  ).copy(image, bodyOffset);
   metadata.copy(image, 0x0300);
-  resourceDirectory.copy(image, 0x0800);
+  resourceDirectory.copy(image, resourceOffset);
   return image;
 };
 
@@ -448,7 +472,9 @@ const buildManagedFixtureImage = (
 export const buildManagedPeFixture = (
   options: ManagedPeFixtureOptions = {},
 ): Buffer =>
-  buildManagedFixtureImage(options, buildManagedFixtureMetadata(options));
+  buildManagedFixtureImage(options, (methodRva) =>
+    buildManagedFixtureMetadata(options, methodRva),
+  );
 
 /** Build a syntactically valid PE32 fixture with no CLI directory. */
 export const buildNativePeFixture = (): Buffer => {

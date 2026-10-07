@@ -77,13 +77,21 @@ const readReferences = (
   bytes: Buffer,
   layout: ManagedMetadataLayout,
   issues: ManagedParseIssue[],
-): readonly AssemblyReference[] =>
-  readRows(layout.table(35), (row) =>
+): {
+  readonly references: readonly AssemblyReference[];
+  readonly referenceNames: readonly string[];
+} => {
+  const references = readRows(layout.table(35), (row) =>
     safeRead(
       () => readAssemblyReference(bytes, layout, row, heapExtent(layout)),
       issues,
     ),
   );
+  return {
+    references,
+    referenceNames: [...new Set(references.map(({ name }) => name))].sort(),
+  };
+};
 
 const readResources = ({
   bytes,
@@ -114,53 +122,27 @@ const readAttributes = (
   bytes: Buffer,
   layout: ManagedMetadataLayout,
   issues: ManagedParseIssue[],
-): readonly CustomAttribute[] =>
-  readRows(layout.table(12), (row) =>
+): {
+  readonly attributes: readonly CustomAttribute[];
+  readonly targetFrameworks: readonly string[];
+} => {
+  const attributes = readRows(layout.table(12), (row) =>
     safeRead(
       () => readCustomAttribute(bytes, layout, row, heapExtent(layout)),
       issues,
     ),
   );
-
-const collectReferenceNames = (
-  bytes: Buffer,
-  layout: ManagedMetadataLayout,
-  issues: ManagedParseIssue[],
-): readonly string[] => {
-  const names: string[] = [];
-  const referenceTable = layout.table(35);
-  for (let row = 1; row <= (referenceTable?.rowCount ?? 0); row += 1) {
-    const reference = safeRead(
-      () => readAssemblyReference(bytes, layout, row, heapExtent(layout)),
-      issues,
-    );
-    if (reference !== undefined) names.push(reference.name);
-  }
-  return names;
-};
-
-const collectTargetFrameworks = (
-  bytes: Buffer,
-  layout: ManagedMetadataLayout,
-  issues: ManagedParseIssue[],
-): readonly string[] => {
-  const targetFrameworks: string[] = [];
-  const attributeTable = layout.table(12);
-  for (let row = 1; row <= (attributeTable?.rowCount ?? 0); row += 1) {
-    const attribute = safeRead(
-      () => readCustomAttribute(bytes, layout, row, heapExtent(layout)),
-      issues,
-    );
+  const targetFrameworks = new Set<string>();
+  for (const attribute of attributes) {
     if (
-      attribute?.parent_token === metadataToken(32, 1) &&
+      attribute.parent_token === metadataToken(32, 1) &&
       attribute.type_name ===
         "System.Runtime.Versioning.TargetFrameworkAttribute" &&
-      attribute.decoded_fixed_string !== null &&
-      !targetFrameworks.includes(attribute.decoded_fixed_string)
+      attribute.decoded_fixed_string !== null
     )
-      targetFrameworks.push(attribute.decoded_fixed_string);
+      targetFrameworks.add(attribute.decoded_fixed_string);
   }
-  return targetFrameworks;
+  return { attributes, targetFrameworks: [...targetFrameworks].sort() };
 };
 
 /** Inventory identity tables without CLR reflection or execution. */
@@ -176,21 +158,27 @@ export const readManagedMetadataInventory = (
   const assembly =
     safeRead(() => readAssembly(bytes, layout, heapExtent(layout)), issues) ??
     null;
-  const references = readReferences(bytes, layout, issues);
+  const { references, referenceNames } = readReferences(
+    bytes,
+    layout,
+    issues,
+  );
   const resources = readResources({
     bytes,
     layout,
     resourceDirectory,
     issues,
   });
-  const attributes = readAttributes(bytes, layout, issues);
-  const referenceNames = collectReferenceNames(bytes, layout, issues);
-  const targetFrameworks = collectTargetFrameworks(bytes, layout, issues);
+  const { attributes, targetFrameworks } = readAttributes(
+    bytes,
+    layout,
+    issues,
+  );
   return {
     module,
     assembly,
-    targetFrameworks: [...targetFrameworks].sort(),
-    referenceNames: [...new Set(referenceNames)].sort(),
+    targetFrameworks,
+    referenceNames,
     references,
     resources,
     attributes,
