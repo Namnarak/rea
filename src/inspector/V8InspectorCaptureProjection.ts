@@ -52,14 +52,27 @@ export const finalizeInspectorCapture = async ({
     string,
     JavaScriptRuntimeObservation["scripts"]["items"][number]
   >();
+  const draftsByUrl = new Map<string, ScriptDraft[]>();
   for (const draft of state.scripts) {
-    const decision = await authorizeRuntimeLocation(draft.rawUrl);
-    if (!decision.allowed) {
-      exclusions[inspectorExclusionKey(decision.reason)] += 1;
-      continue;
+    const drafts = draftsByUrl.get(draft.rawUrl) ?? [];
+    drafts.push(draft);
+    draftsByUrl.set(draft.rawUrl, drafts);
+  }
+  const authorizedGroups = await Promise.all(
+    [...draftsByUrl].map(async ([rawUrl, drafts]) => ({
+      drafts,
+      decision: await authorizeRuntimeLocation(rawUrl),
+    })),
+  );
+  for (const { drafts, decision } of authorizedGroups) {
+    for (const draft of drafts) {
+      if (!decision.allowed) {
+        exclusions[inspectorExclusionKey(decision.reason)] += 1;
+        continue;
+      }
+      const script = scriptFromDraft(draft, decision.location);
+      scripts.set(script.script_key, script);
     }
-    const script = scriptFromDraft(draft, decision.location);
-    scripts.set(script.script_key, script);
   }
   const items = [...scripts.values()].sort((left, right) =>
     left.script_key < right.script_key
