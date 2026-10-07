@@ -263,6 +263,7 @@ try {
     ]);
     native.call("runtime_snapshot_cancel", [runtime.handle]);
     await assert.rejects(cancelled, /cancelled/u);
+    assert.equal(await exists(join(runtime.path, "cancelled.bin")), false);
     report.controls = {
       ...report.controls,
       protectedDaclReadback: true,
