@@ -766,9 +766,7 @@ pre code {
   margin-left: 0.4em;
   vertical-align: -0.12em;
   background: #9bbfe5;
-}
-.agent-terminal.is-visible .terminal-cursor {
-  animation: terminal-blink 1s step-end 6;
+  animation: terminal-blink 1s step-end infinite;
 }
 @keyframes terminal-blink {
   50% {
@@ -1131,7 +1129,7 @@ pre code {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .agent-terminal.is-visible .terminal-cursor {
+  .terminal-cursor {
     animation: none;
   }
 }

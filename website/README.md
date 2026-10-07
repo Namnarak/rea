@@ -2,14 +2,15 @@
 
 An English static website with explanatory figures, worked guides and DX-Ball and Notion investigations.
 The public files are in `website/public/`. The site uses HTML, CSS and a small
-script for copying code and following the assembly-to-C comparison; it has no
-build step or npm dependencies.
+script for copying code and following the assembly-to-C comparison. Python
+packages the downloadable example; there is no frontend bundler or npm dependency.
 
 ## Local preview
 
 From the repository root:
 
 ```sh
+python3 scripts/prepare-website.py
 python3 -m http.server 4173 --bind 127.0.0.1 --directory website/public
 ```
 
@@ -42,9 +43,18 @@ Electron fixture is for static analysis; Electron is not a prerequisite for
 following that example. The separate Notes browser app runs in the local preview
 and constructs a CSV download after fetching its JSON data.
 
+The Electron guide offers one ZIP containing the six source files under
+`notes-example/`. `scripts/prepare-website.py` generates this download from
+an explicit file list, with fixed timestamps and permissions. The ZIP is ignored
+by Git; website checks and each manual publication regenerate it before checking
+and uploading the public directory. The verifier checks that its entries match
+the current source and contain no extra files.
+
 Agent terminals show example prompts, not transcripts of previous
-investigations. A short cursor animation starts when the prompt enters view and
-respects reduced-motion preferences. All prompt text is present without JavaScript.
+investigations. All cursors blink continuously with the same CSS animation,
+respecting reduced-motion preferences. Both the prompt and animation work
+without JavaScript. The homepage and agent setup section share a copyable
+installation prompt; setup still presents its plan for approval.
 
 DX-Ball figures and findings refer to the linked 7 October 2026 checkpoint,
 commit `a55dca27ec0a07018c1b2c95ae2be027f7d8c3c4`. Update those links and figures
@@ -86,6 +96,7 @@ and the single Pages publisher without installing npm dependencies. The same
 checks run before each manual deployment. You can also run them locally:
 
 ```sh
+python3 scripts/prepare-website.py
 python3 scripts/verify-website.py
 ```
 
