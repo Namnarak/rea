@@ -385,7 +385,7 @@ export const processCaptureSchema = processCaptureShapeSchema
       });
   })
   .describe(
-    "The capture must preserve its canonical scenario, comparison, and normalization SHA-256 commitments; ordered capture timestamps and contiguous sequence numbers; a complete event journal with unique in-range references; before and final filesystem snapshots with truncation propagated; and exit-code consistency with deadline termination. These cross-field invariants are checked by REA after capture.",
+    "The capture must preserve its canonical scenario, comparison, and normalization SHA-256 commitments; ordered capture timestamps and contiguous sequence numbers; before and final filesystem snapshots with truncation propagated; and exit-code consistency with deadline termination. When parsing older input without an event journal, REA supplies an empty journal; empty journals are valid. A non-empty journal must reference every captured observation exactly once with unique in-range references. These cross-field invariants are checked by REA after capture.",
   );
 
 export { parseProcessCapture } from "./processCaptureParsing.js";

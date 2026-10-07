@@ -122,10 +122,17 @@ it("advertises semantic output invariants and keeps producers aligned with Zod",
 
     const process = outputResultSchema("capture_process_scenario");
     expect(process.result.description).toContain("canonical scenario");
+    expect(process.result.description).toContain(
+      "older input without an event journal",
+    );
     const validCapture = processCaptureSchema.parse(
       EMPTY_PROCESS_CAPTURE_EXAMPLE,
     );
+    expect(validCapture.event_journal).toEqual([]);
     expect(process.validate(validCapture)).toBe(true);
+    expect(
+      processCaptureSchema.safeParse(EMPTY_PROCESS_CAPTURE_EXAMPLE).success,
+    ).toBe(true);
     const invalidCapture = {
       ...validCapture,
       manifest: {
