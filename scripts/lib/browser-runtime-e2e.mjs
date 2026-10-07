@@ -2,8 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
-import { access, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -17,6 +16,10 @@ import { webExecutionSchema } from "../../dist/domain/webExecution.js";
 import { webEventListenersSchema } from "../../dist/domain/webEventListeners.js";
 import { startBrowserRuntimeSite } from "../fixtures/browser-runtime-site.mjs";
 import { mcpTextValue } from "./mcp-verifier-results.mjs";
+import {
+  startRuntimeFixtureBrowser,
+  closeRuntimeFixtureResources,
+} from "./browser-runtime-fixture-lifecycle.mjs";
 
 /** Exercise native browser runtime attribution through public CLI and stdio MCP, including arming. */
 export async function verifyBrowserRuntime(
@@ -25,34 +28,17 @@ export async function verifyBrowserRuntime(
 ) {
   await access(executable);
   const site = await startBrowserRuntimeSite();
-  const profile = await mkdtemp(join(tmpdir(), "rea-real-web-runtime-"));
-  const browser = spawn(
-    executable,
-    [
-      "--headless=new",
-      ...(process.env.REA_BROWSER_NO_SANDBOX === "true"
-        ? ["--no-sandbox"]
-        : []),
-      "--remote-debugging-address=127.0.0.1",
-      "--remote-debugging-port=0",
-      `--user-data-dir=${profile}`,
-      "--no-first-run",
-      "--no-default-browser-check",
-      "--disable-background-networking",
-      "--disable-component-update",
-      "--disable-dev-shm-usage",
-      "--disable-sync",
-      site.origin,
-    ],
-    { stdio: ["ignore", "ignore", "pipe"] },
-  );
+  let fixture;
+  let primaryError;
   let stderr = "";
-  browser.stderr.on("data", (chunk) => {
-    if (stderr.length < 65536) stderr += chunk;
-  });
   let action;
   let client;
   try {
+    fixture = await startRuntimeFixtureBrowser(executable, site.origin);
+    const { browser, profile } = fixture;
+    browser.stderr.on("data", (chunk) => {
+      if (stderr.length < 65536) stderr += chunk;
+    });
     const port = await waitForBrowserDevtoolsPort({
       child: browser,
       executable,
@@ -147,15 +133,19 @@ export async function verifyBrowserRuntime(
       fresh_mcp: freshMcpProof,
       page_remained_open: true,
     };
+  } catch (cause) {
+    primaryError = cause;
+    throw cause;
   } finally {
-    await client?.close();
-    await action?.close();
-    if (browser.exitCode === null && browser.signalCode === null) {
-      browser.kill("SIGTERM");
-      await once(browser, "exit");
-    }
-    await site.close();
-    await rm(profile, { recursive: true, force: true });
+    await closeRuntimeFixtureResources(
+      [
+        () => client?.close(),
+        () => action?.close(),
+        () => fixture?.close(),
+        () => site.close(),
+      ],
+      primaryError,
+    );
   }
 }
 

@@ -1,6 +1,7 @@
 import type { WebExecution } from "../../domain/webExecution.js";
 import { AnalysisOutputError } from "../../domain/analysisErrorCore.js";
 import { sanitizeBrowserUrl } from "../../domain/browserObservation.js";
+import { jsonObjectSchema } from "../../domain/jsonValue.js";
 import { WEB_RUNTIME_LIMITS } from "../../domain/webRuntime.js";
 import type { CdpEvent } from "../CdpConnection.js";
 import {
@@ -80,6 +81,7 @@ export class CdpRuntimeRequests {
         method: request.request.method,
         timestamp_seconds: request.timestamp,
         initiator_type: request.initiator.type,
+        reported_initiator: jsonObjectSchema.parse(request.initiator),
         callsites,
         async_parent_ids: parents,
         causal_attribution: "unknown",

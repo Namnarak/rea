@@ -20,7 +20,9 @@ Results retain:
 - The selected target, frame and document loader identity; local armed/end timestamps and separate backend monotonic coverage timestamps.
 - Every admitted producer function/block range, exclusive end offset and execution count in UTF-16 code units, with verified bounds when exact text is available. Nested/overlapping counts are preserved and must not be summed.
 - Main-document script inventory, exact session script IDs, resource start coordinates, sourceURL/source-map declarations, producer hash and independently computed UTF-8 text digest.
-- Armed-window requests from the selected main frame and selected origins, complete embedded initiator stacks, exact script-ID associations and unresolved async parent IDs. Source association does not establish UI causality.
+- Armed-window requests from the selected main frame and selected origins, complete reported initiator objects (including stack hierarchy/descriptions), derived callsites, exact script-ID associations and unresolved async parent IDs. Source association does not establish UI causality.
+
+The coverage counter interval starts at backend acceptance before the armed receipt and ends at the resetting sample after the local timer. Counts may include execution during these command intervals; request events are restricted to the locally armed window. The result retains both backend timestamps and the distinct local clock.
 
 A document replacement ends the window; final coverage then remains unavailable. Missing coverage is unknown: an already loaded script may be absent from a sample. A detailed request also does not guarantee block granularity for already compiled functions. If `is_block_coverage` is false, the function-only ranges are observed and branch execution remains unknown. Native Chrome verification reproduced block coverage in the first window and function-only coverage in a subsequent window, including without REA.
 
@@ -40,7 +42,7 @@ The result contains directly registered listener types/flags, callback coordinat
 
 Each protocol message has a 64 MiB budget; script/context metadata and request metadata each have an 8 MiB retained budget. Complete retained source text has a 32 MiB budget. Oversized or malformed evidence returns no partial successful result. Each command and the complete inspection/source-join phase have a 20-second deadline; cleanup has a separate 5-second command deadline plus transport closure. The selected observation duration must fit the host timer's positive 32-bit millisecond range. REA does not control the externally owned browser's CPU or memory.
 
-`npm run verify:browser:runtime` uses caller-supplied `REA_BROWSER_EXECUTABLE` against an owned synthetic fixture, through real public CLI and stdio MCP. It checks exact Unicode/CRLF text/digests, same-URL identities, executed and zero-count branches, function-only unknowns on repeated observation, listener selection, initiator association, actual arming and preservation of the external page. The optional positional entrypoint to `scripts/verify-browser-runtime.mjs` permits the same checks against an isolated installed tarball.
+`npm run verify:browser:runtime` uses caller-supplied `REA_BROWSER_EXECUTABLE` and the native `ps` command on Linux/macOS against an owned synthetic fixture, through real public CLI and stdio MCP. It checks exact Unicode/CRLF text/digests, same-URL identities, executed and zero-count branches, function-only unknowns on repeated observation, listener selection, initiator association, actual arming and preservation of the external page. The optional positional entrypoint to `scripts/verify-browser-runtime.mjs` permits the same checks against an isolated installed tarball.
 
 Real workflow coverage is Linux x64 / Chrome 153 / Node 24. Other browser engines and host workflows remain unverified. The conditional `real-web-runtime` CI lane acquires Chrome only for relevant changes; ordinary unit/static checks need no browser.
 

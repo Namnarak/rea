@@ -69,13 +69,15 @@ export const runtimeRequestSchema = z.object({
   frameId: z.string().optional(),
   timestamp: z.number().min(0),
   request: z.object({ url: z.string(), method: z.string() }),
-  initiator: z.object({
-    type: z.string(),
-    stack: z.unknown().optional(),
-    url: z.string().optional(),
-    lineNumber: integer.optional(),
-    columnNumber: integer.optional(),
-  }),
+  initiator: z
+    .object({
+      type: z.string(),
+      stack: z.unknown().optional(),
+      url: z.string().optional(),
+      lineNumber: integer.optional(),
+      columnNumber: integer.optional(),
+    })
+    .passthrough(),
 });
 /** Native listener descriptors omit live remote handles from portable evidence. */
 export const runtimeListenersSchema = z.object({

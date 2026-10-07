@@ -51,7 +51,7 @@ export const observeCdpSession = async (
     sessionId: context.sessionId,
     signal: context.signal,
     allowedOrigins,
-    delayOperation: "observe_web_session",
+    operation: "observe_web_session",
   });
   const initialUrl = mainFrameUrl(initial) ?? "";
   const mainFrameId = frameId(initial);

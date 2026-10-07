@@ -27,6 +27,7 @@ import {
 
 /** Native CDP integration with distinct inspection/instrumentation authority and confirmed cleanup. */
 export class CdpWebRuntimeProvider implements WebRuntimePort {
+  /** Identify this adapter independently of the captured browser version. */
   identity() {
     return CDP_BROWSER_PROVIDER_IDENTITY;
   }

@@ -73,7 +73,7 @@ export class CdpRuntimeSession {
             ...transport,
             allowedOrigins,
             signal,
-            delayOperation: operation,
+            operation,
           }),
         );
         const frame = tree.frameTree.frame;
@@ -155,8 +155,7 @@ export class CdpRuntimeSession {
     if (
       frame.id !== this.target.frame_id ||
       sanitizeBrowserUrl(frame.url).url !== this.target.initial_url ||
-      (this.target.loader_id !== null &&
-        frame.loaderId !== this.target.loader_id)
+      (frame.loaderId ?? null) !== this.target.loader_id
     )
       throw new BrowserObservationError(this.operation, "target_changed", {
         detail: `Selected target ${this.target.target_id} changed document during ${this.operation}.`,

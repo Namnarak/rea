@@ -44,7 +44,9 @@ describe("native runtime producer boundary", () => {
       },
       initiator: {
         type: "script",
+        producerExtension: "retain-unknown-fields",
         stack: {
+          description: "observed-sync-stack",
           callFrames: [
             {
               scriptId: "script-b",
@@ -55,6 +57,7 @@ describe("native runtime producer boundary", () => {
             },
           ],
           parent: {
+            description: "observed-async-stack",
             callFrames: [
               {
                 scriptId: "unknown-script",
@@ -91,6 +94,9 @@ describe("native runtime producer boundary", () => {
     );
     if (!result.ok) throw result.error;
     expect(result.value.requests).toHaveLength(1);
+    expect(result.value.requests[0]?.reported_initiator).toEqual(
+      params.initiator,
+    );
     expect(result.value.requests[0]?.callsites).toMatchObject([
       { script_id: "script-b", source_association: "script_id" },
       { script_id: "unknown-script", source_association: "unknown" },
@@ -100,7 +106,9 @@ describe("native runtime producer boundary", () => {
     ]);
     expect(result.value.requests[0]?.causal_attribution).toBe("unknown");
   });
+});
 
+describe("runtime window and producer granularity", () => {
   it("ends at document replacement and leaves coverage explicitly unavailable", async () => {
     const { browser, provider, execution } = await fixture();
     const result = await provider.observeExecution(
@@ -359,4 +367,67 @@ describe("runtime lifecycle and invalid producer data", () => {
       throw new Error("Byte offsets must not be mislabeled UTF-16");
     expect(result.error._tag).toBe("AnalysisOutputError");
   });
+});
+
+describe("runtime document identity and authorization failures", () => {
+  it.each(["execution", "listeners"] as const)(
+    "rejects newly reported loader identity for %s when the initial loader was unknown",
+    async (action) => {
+      const { provider, execution, listeners } = await fixture({
+        commandResult: (command, origin, frameReads) =>
+          command.method === "Page.getFrameTree"
+            ? {
+                frameTree: {
+                  frame: {
+                    id: "runtime-main",
+                    url: `${origin}/allowed`,
+                    ...(frameReads === 1 ? {} : { loaderId: "new-document" }),
+                  },
+                },
+              }
+            : undefined,
+      });
+      const result =
+        action === "execution"
+          ? await provider.observeExecution(execution)
+          : await provider.inspectEventListeners(listeners);
+      if (result.ok)
+        throw new Error(
+          "Unknown loader must not accept a newly reported document identity",
+        );
+      expect(result.error).toMatchObject({ reason: "target_changed" });
+    },
+  );
+
+  it.each(["execution", "listeners"] as const)(
+    "reports the selected %s operation when the live frame origin is denied",
+    async (action) => {
+      const { provider, execution, listeners } = await fixture({
+        commandResult: (command) =>
+          command.method === "Page.getFrameTree"
+            ? {
+                frameTree: {
+                  frame: {
+                    id: "runtime-main",
+                    url: "https://unselected.example/document",
+                    loaderId: "denied",
+                  },
+                },
+              }
+            : undefined,
+      });
+      const result =
+        action === "execution"
+          ? await provider.observeExecution(execution)
+          : await provider.inspectEventListeners(listeners);
+      if (result.ok) throw new Error("Unselected live origin must be denied");
+      expect(result.error).toMatchObject({
+        reason: "target_not_allowed",
+        operation:
+          action === "execution"
+            ? "observe_web_execution"
+            : "inspect_web_event_listeners",
+      });
+    },
+  );
 });

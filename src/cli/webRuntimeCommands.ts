@@ -26,7 +26,12 @@ export const registerWebRuntimeCommands = (
   cli.command(CLI_COMMANDS.observeWebExecution, {
     description:
       "Observe precise page execution; resets counters and temporarily disables optimization",
-    args: z.object({ endpoint: z.string(), targetId: z.string() }),
+    args: z.object({
+      endpoint: z.string().describe("Existing loopback browser CDP endpoint"),
+      targetId: z
+        .string()
+        .describe("Selected page target ID from list-browser-targets"),
+    }),
     options: z.object({
       ...browserScopeOptions,
       observationMs: observationDuration(10_000, 1),
@@ -51,9 +56,13 @@ export const registerWebRuntimeCommands = (
     description:
       "Inspect native listener source locations on the first main-document CSS match",
     args: z.object({
-      endpoint: z.string(),
-      targetId: z.string(),
-      selector: z.string(),
+      endpoint: z.string().describe("Existing loopback browser CDP endpoint"),
+      targetId: z
+        .string()
+        .describe("Selected page target ID from list-browser-targets"),
+      selector: z
+        .string()
+        .describe("Native CSS selector; inspect the first main-document match"),
     }),
     options: z.object({ ...browserScopeOptions }),
     run: ({ args, options }) =>

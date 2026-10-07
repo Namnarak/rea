@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { jsonObjectSchema } from "./jsonValue.js";
 import {
   webRuntimeBrowserSchema,
   webRuntimeLocationSchema,
@@ -64,6 +65,7 @@ export const webExecutionSchema = z.object({
       method: z.string(),
       timestamp_seconds: z.number().min(0),
       initiator_type: z.string(),
+      reported_initiator: jsonObjectSchema,
       callsites: z.array(webRuntimeLocationSchema),
       async_parent_ids: z.array(
         z.object({ id: z.string(), debugger_id: z.string().nullable() }),
