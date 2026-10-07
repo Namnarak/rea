@@ -25,7 +25,8 @@ export const parseCliJsonInput = async (
   } catch (cause: unknown) {
     if (
       ["{", "["].includes(value.trimStart()[0] ?? "") &&
-      fileDoesNotExist(cause)
+      fileDoesNotExist(cause) &&
+      !hasExplicitJsonFileExtension(value)
     )
       return { ok: false, error: inputError(operation) };
     return jsonFileError(value, operation, "read-failed", cause);
@@ -37,6 +38,9 @@ const fileDoesNotExist = (cause: unknown): boolean =>
   cause !== null &&
   "code" in cause &&
   cause.code === "ENOENT";
+
+const hasExplicitJsonFileExtension = (value: string): boolean =>
+  value.toLowerCase().endsWith(".json");
 
 const parseJson = (value: string | Uint8Array): unknown => {
   let text: string;

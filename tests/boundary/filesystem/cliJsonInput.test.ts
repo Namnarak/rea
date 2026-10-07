@@ -14,6 +14,15 @@ describe("CLI JSON input", () => {
       ).toEqual({ ok: true, value });
     expect(await parseCliJsonInput("{", "test-input")).toMatchObject({
       ok: false,
+      error: {
+        details: { issues: [{ reason: "invalid_format", expected: "JSON" }] },
+      },
+    });
+    expect(await parseCliJsonInput("[", "test-input")).toMatchObject({
+      ok: false,
+      error: {
+        details: { issues: [{ reason: "invalid_format", expected: "JSON" }] },
+      },
     });
     const root = await createTestTempDirectory("rea-json-input-");
     const path = join(root, "input.json");
@@ -28,6 +37,14 @@ describe("CLI JSON input", () => {
       ok: true,
       value: ["preserved"],
     });
+    for (const missingPath of [
+      join(root, "{capture}.json"),
+      join(root, "[missing].json"),
+    ])
+      expect(await parseCliJsonInput(missingPath, "test-input")).toMatchObject({
+        ok: false,
+        error: { input_path: missingPath, input_reason: "read-failed" },
+      });
     expect(await parseCliJsonInput(root, "test-input")).toMatchObject({
       ok: false,
       error: { input_reason: "read-failed" },
