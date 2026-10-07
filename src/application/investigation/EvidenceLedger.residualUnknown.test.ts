@@ -77,6 +77,28 @@ const update = (
   });
 
 describe("residual unknown registry reads and identity", () => {
+  it("merges record-only bundles without changing retained unknown history", () => {
+    const store = ledger();
+    const created = store.recordUnknown(
+      input("Does a later record preserve this unknown?"),
+      mutation("record-only-import"),
+    );
+    expect(created.ok).toBe(true);
+    const originalUnknowns = store.export().unknowns;
+    const addition = evidence("record-only-addition");
+    const bundle = createEvidenceBundle([addition]);
+
+    expect(store.import(bundle)).toEqual({
+      ok: true,
+      value: { recordsAdded: 1, unknownsAdded: 0, changed: true },
+    });
+    expect(store.export().unknowns).toEqual(originalUnknowns);
+    expect(store.import(bundle)).toEqual({
+      ok: true,
+      value: { recordsAdded: 0, unknownsAdded: 0, changed: false },
+    });
+  });
+
   it("returns detached unknowns and evidence bundles from every read surface", () => {
     const store = ledger();
     expect(store.record(evidence("detached-record")).ok).toBe(true);

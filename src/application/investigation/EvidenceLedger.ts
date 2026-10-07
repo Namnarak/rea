@@ -70,6 +70,30 @@ export class EvidenceLedger {
         }),
       );
     }
+    // A record-only bundle cannot change the already-valid unknown graph. The
+    // bundle parser has validated every incoming record and its manifests, so
+    // checking ID conflicts and committing only the additions preserves the
+    // atomic merge without rebuilding and reparsing the entire ledger.
+    if (bundle.unknowns.length === 0) {
+      const additions = new Map<string, Evidence>();
+      for (const evidence of bundle.records) {
+        const existing = this.#records.get(evidence.evidence_id);
+        if (existing !== undefined) {
+          if (!recordsAgree(existing, evidence))
+            return err(
+              new EvidenceIntegrityError("Conflicting evidence record"),
+            );
+          continue;
+        }
+        additions.set(evidence.evidence_id, evidence);
+      }
+      for (const [id, evidence] of additions) this.#records.set(id, evidence);
+      return ok({
+        recordsAdded: additions.size,
+        unknownsAdded: 0,
+        changed: additions.size > 0,
+      });
+    }
     const pending = new Map(this.#records);
     for (const evidence of bundle.records) {
       const existing = pending.get(evidence.evidence_id);
