@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { parseBinaryTarget } from "../dist/application/BinaryTargetResolver.js";
-import { inspectAppleDispatchMetadata } from "../dist/native/AppleDispatchMetadata.js";
+import { parseBinaryTarget } from "../../../dist/application/BinaryTargetResolver.js";
+import { inspectAppleDispatchMetadata } from "../../../dist/native/AppleDispatchMetadata.js";
 
 if (process.platform !== "darwin")
   throw new Error(
@@ -22,7 +22,7 @@ try {
     "Foundation",
     "-Wl,-no_fixup_chains",
     fileURLToPath(
-      new URL("../tests/conformance/native/dispatch.m", import.meta.url),
+      new URL("../../../tests/conformance/native/dispatch.m", import.meta.url),
     ),
     "-o",
     targetPath,
@@ -79,7 +79,10 @@ try {
     "-Xlinker",
     "-no_fixup_chains",
     fileURLToPath(
-      new URL("../tests/conformance/native/dispatch.swift", import.meta.url),
+      new URL(
+        "../../../tests/conformance/native/dispatch.swift",
+        import.meta.url,
+      ),
     ),
     "-o",
     swiftPath,
