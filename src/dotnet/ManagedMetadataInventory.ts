@@ -158,11 +158,7 @@ export const readManagedMetadataInventory = (
   const assembly =
     safeRead(() => readAssembly(bytes, layout, heapExtent(layout)), issues) ??
     null;
-  const { references, referenceNames } = readReferences(
-    bytes,
-    layout,
-    issues,
-  );
+  const { references, referenceNames } = readReferences(bytes, layout, issues);
   const resources = readResources({
     bytes,
     layout,
