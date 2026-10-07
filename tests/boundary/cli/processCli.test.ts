@@ -182,11 +182,52 @@ describe("process CLI errors", () => {
       category: "invalid_input",
       details: {
         operation: "capture_process_scenario",
-        issues: [{ path: ["arguments", 0], reason: "invalid_format" }],
+        issues: [
+          {
+            path: ["arguments", 0],
+            reason: "invalid_format",
+            expected: "regex",
+            message:
+              "Values passed to operating-system APIs cannot contain NUL",
+          },
+        ],
       },
     });
   });
+});
 
+describe("process CLI environment key diagnostics", () => {
+  it("reports the reserved process environment key constraint", async () => {
+    const root = await fixture();
+    const scenario = join(root, "reserved-environment.json");
+    await writeFile(
+      scenario,
+      JSON.stringify({
+        executable: process.execPath,
+        environment: { REA_PROCESS_RUN_ID: "caller-value" },
+      }),
+    );
+
+    expect(await captureProcessScenarioFile(scenario)).toMatchObject({
+      error: "Process command failed",
+      code: "invalid_request",
+      category: "invalid_input",
+      details: {
+        operation: "capture_process_scenario",
+        issues: [
+          {
+            path: ["environment", "REA_PROCESS_RUN_ID"],
+            reason: "invalid_format",
+            expected: "regex",
+            message: "REA_PROCESS_RUN_ID is reserved by the process adapter",
+          },
+        ],
+      },
+    });
+  });
+});
+
+describe("process CLI evidence validation", () => {
   it("captures the minimal executable-and-arguments scenario", async () => {
     const root = await fixture();
     const scenario = join(root, "scenario.json");
