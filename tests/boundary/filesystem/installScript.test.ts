@@ -181,6 +181,52 @@ describe("curl installer scenarios", { timeout: 20_000 }, () => {
   });
 });
 
+describe("installer semantic version parsing", { timeout: 20_000 }, () => {
+  it.each(["01.2.3", "1.2.3-01", "1.2.3-alpha..1"])(
+    "rejects malformed semantic versions before invoking npm: %s",
+    async (version) => {
+      const fixture = await createFixture();
+      await expect(
+        runInstaller(fixture, ["--version", version, "--dry-run"]),
+      ).rejects.toMatchObject({
+        stderr:
+          "REA installation failed: version must be an exact semantic version.\n",
+      });
+      await expect(readFile(fixture.npmLog, "utf8")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    },
+  );
+
+  it("accepts valid prerelease and build metadata in a pinned version", async () => {
+    const fixture = await createFixture();
+    const result = await runInstaller(fixture, [
+      "--version",
+      "1.2.3-alpha.0+build.01",
+      "--dry-run",
+    ]);
+    expect(result.stdout).toContain("Version: 1.2.3-alpha.0+build.01");
+    await expect(readFile(fixture.npmLog, "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("rejects an invalid semantic version from the latest release tag", async () => {
+    const fixture = await createFixture();
+    await expect(
+      runInstaller(fixture, [], {
+        FAKE_CURL_BODY: '{"tag_name":"rea-agents-1.2.3-01"}',
+      }),
+    ).rejects.toMatchObject({
+      stderr:
+        "REA installation failed: the latest release tag was invalid. Retry later or pass --version VERSION.\n",
+    });
+    await expect(readFile(fixture.npmLog, "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+});
+
 interface InstallerFixture {
   readonly home: string;
   readonly bin: string;
