@@ -233,6 +233,11 @@ const finishProcessRun = async (options: {
   );
 };
 
+const normalizeCaptureFailure = (
+  cause: unknown,
+  signal: AbortSignal | undefined,
+): unknown => (signal?.aborted === true ? processCaptureCancelled() : cause);
+
 const completeCapture = async (options: {
   readonly scenario: ProcessScenario;
   readonly hostPlatform: NodeJS.Platform;
@@ -381,7 +386,7 @@ const runProcessScenario = async (
     });
   } catch (cause: unknown) {
     runtime?.terminal.kill("SIGKILL");
-    executionFailure = cause;
+    executionFailure = normalizeCaptureFailure(cause, signal);
   }
   return finishProcessRun({
     runtime,
@@ -422,9 +427,10 @@ export const captureProcessScenario = async (
       await runProcessScenario(resolvedScenario, signal, environment, platform),
     );
   } catch (cause: unknown) {
+    const failure = normalizeCaptureFailure(cause, signal);
     return err(
-      cause instanceof ProcessCaptureError
-        ? cause
+      failure instanceof ProcessCaptureError
+        ? failure
         : new ProcessCaptureError("process capture failed", { cause }),
     );
   }

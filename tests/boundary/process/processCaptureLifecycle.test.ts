@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { rm, symlink } from "node:fs/promises";
+import { rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -12,6 +12,9 @@ import { parseProcessScenario } from "../../../src/domain/processCapture.js";
 
 const processFixture = fileURLToPath(
   new URL("../../fixtures/processFidelity.mjs", import.meta.url),
+);
+const snapshotCancellationFixture = fileURLToPath(
+  new URL("../../fixtures/processSnapshotCancellation.mjs", import.meta.url),
 );
 const execFileAsync = promisify(execFile);
 
@@ -80,6 +83,101 @@ itWithCaptureCapability(
     expect(cancelled.ok).toBe(false);
     if (cancelled.ok) throw new Error("expected cancellation");
     expect(cancelled.error.message).toContain("cancelled");
+  },
+);
+
+itWithCaptureCapability(
+  "classifies cancellation raised by the initial filesystem snapshot",
+  async () => {
+    const root = await createTestTempDirectory("rea-snapshot-initial-cancel-");
+    const path = join(root, "input");
+    await writeFile(path, "observed\n");
+    const controller = new AbortController();
+    const { signal } = controller;
+    const throwIfAborted = signal.throwIfAborted.bind(signal);
+    Object.defineProperty(signal, "throwIfAborted", {
+      value: () => {
+        controller.abort();
+        throwIfAborted();
+      },
+    });
+
+    const result = await captureProcessScenario(
+      parseProcessScenario({
+        executable: process.execPath,
+        working_directory: root,
+        filesystem_observation_paths: [path],
+      }),
+      signal,
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected initial snapshot cancellation");
+    expect(result.error).toMatchObject({
+      reason: "cancelled",
+      userCategory: "cancelled",
+    });
+  },
+);
+
+itWithCaptureCapability(
+  "classifies cancellation raised by the final filesystem snapshot",
+  async () => {
+    const root = await createTestTempDirectory("rea-snapshot-final-cancel-");
+    const controller = new AbortController();
+    const { signal } = controller;
+    const throwIfAborted = signal.throwIfAborted.bind(signal);
+    let cancellationChecks = 0;
+    Object.defineProperty(signal, "throwIfAborted", {
+      value: () => {
+        cancellationChecks += 1;
+        if (cancellationChecks === 4) controller.abort();
+        throwIfAborted();
+      },
+    });
+    const resultPromise = captureProcessScenario(
+      parseProcessScenario({
+        executable: process.execPath,
+        arguments: [snapshotCancellationFixture, root],
+        working_directory: dirname(snapshotCancellationFixture),
+        filesystem_observation_paths: [root],
+        settle_ms: 0,
+      }),
+      signal,
+    );
+
+    const result = await resultPromise;
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected final snapshot cancellation");
+    expect(cancellationChecks).toBe(4);
+    expect(result.error).toMatchObject({
+      reason: "cancelled",
+      userCategory: "cancelled",
+    });
+  },
+);
+
+itWithCaptureCapability(
+  "preserves filesystem errors that are not caller cancellation",
+  async () => {
+    const root = await createTestTempDirectory("rea-snapshot-io-error-");
+    const obstruction = join(root, "not-a-directory");
+    await writeFile(obstruction, "file");
+
+    const result = await captureProcessScenario(
+      parseProcessScenario({
+        executable: process.execPath,
+        working_directory: root,
+        filesystem_observation_paths: [join(obstruction, "child")],
+      }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected filesystem observation failure");
+    expect(result.error).toMatchObject({
+      reason: "capture_failed",
+      cause: { code: "ENOTDIR" },
+    });
   },
 );
 
