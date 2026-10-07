@@ -23,6 +23,13 @@ export class CdpExecutionWindow {
 
   /** Collection ends on a main-document replacement, never follows source URLs into another context. */
   ingest(event: CdpEvent): void {
+    if (
+      event.method === "Target.detachedFromTarget" ||
+      event.method === "Inspector.targetCrashed"
+    ) {
+      this.end("target_terminated");
+      return;
+    }
     if (!this.active) return;
     if (event.method === "Runtime.executionContextsCleared")
       this.end("document_changed");

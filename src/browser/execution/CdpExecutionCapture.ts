@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { AnalysisError } from "../../domain/analysisErrorBase.js";
+import { BrowserObservationError } from "../../domain/browserObservationError.js";
+import { cdpTargetEventMatches } from "../CdpTargetEvents.js";
 import {
   AnalysisCancelledError,
   AnalysisOutputError,
@@ -23,7 +25,7 @@ export const captureWebExecution = async (
   const window = new CdpExecutionWindow(session);
   const requests = new CdpRuntimeRequests(sources);
   const unsubscribe = session.transport.connection.onEvent((event) => {
-    if (event.sessionId !== session.transport.sessionId) return;
+    if (!cdpTargetEventMatches(event, session.transport.sessionId)) return;
     try {
       if (window.reason === undefined) sources.ingest(event);
       if (window.active) requests.ingest(event);
@@ -54,6 +56,11 @@ export const captureWebExecution = async (
         allowTriggeredUpdates: false,
       }),
     );
+    sources.check();
+    if (window.reason !== undefined)
+      throw new BrowserObservationError(session.operation, "target_changed", {
+        detail: `Selected target ${session.target.target_id} ended with ${window.reason} before execution observation could be armed.`,
+      });
     const waiting = window.start(input.observation_ms);
     // Cancellation may arrive while asynchronous progress is being delivered.
     void waiting.catch(() => undefined);

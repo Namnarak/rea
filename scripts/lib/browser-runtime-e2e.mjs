@@ -20,6 +20,7 @@ import {
   startRuntimeFixtureBrowser,
   closeRuntimeFixtureResources,
 } from "./browser-runtime-fixture-lifecycle.mjs";
+import { verifyRuntimeTargetTermination } from "./browser-runtime-termination-e2e.mjs";
 
 /** Exercise native browser runtime attribution through public CLI and stdio MCP, including arming. */
 export async function verifyBrowserRuntime(
@@ -115,6 +116,11 @@ export async function verifyBrowserRuntime(
     await reloadFixture(action);
     const freshMcpProof = await executionMcp(client, input, action, site);
     assert.equal(site.evidenceRequests(), 3);
+    const termination = await verifyRuntimeTargetTermination(
+      client,
+      input,
+      site.origin,
+    );
     const stillOpen = await action.send("Runtime.evaluate", {
       expression: "Boolean(document.querySelector('#run'))",
       returnByValue: true,
@@ -137,7 +143,8 @@ export async function verifyBrowserRuntime(
       cli: cliProof,
       mcp: mcpProof,
       listener: cliListenerProof,
-      public_cases: 5,
+      public_cases: 6,
+      termination,
       fresh_mcp: freshMcpProof,
       page_remained_open: true,
     };

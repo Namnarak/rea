@@ -31,7 +31,7 @@ export const normalizePreciseCoverage = (
     )?.source;
     scripts.push({
       script_id: script.scriptId,
-      reported_url: script.url,
+      reported_url: sources.sourceUrl(script.scriptId, script.url),
       functions: script.functions.map((fn) => ({
         name: fn.functionName,
         is_block_coverage: fn.isBlockCoverage,
