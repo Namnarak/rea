@@ -1,11 +1,5 @@
-import {
-  mkdtemp,
-  lstat,
-  readlink,
-  readdir,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { fstatSync } from "node:fs";
+import { mkdtemp, lstat, open, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -15,19 +9,16 @@ import { hashFile } from "./FilesystemSnapshot.js";
 
 const countOpenDescriptorsFor = async (path: string): Promise<number> => {
   const directory = process.platform === "linux" ? "/proc/self/fd" : "/dev/fd";
+  const expected = await lstat(path);
   const descriptors = await readdir(directory);
   const matches = await Promise.all(
     descriptors.map(async (descriptor) => {
+      if (!/^\d+$/u.test(descriptor)) return false;
       try {
-        return (await readlink(join(directory, descriptor))) === path;
+        const stats = fstatSync(Number(descriptor));
+        return stats.dev === expected.dev && stats.ino === expected.ino;
       } catch (cause: unknown) {
-        if (
-          cause instanceof Error &&
-          "code" in cause &&
-          (cause.code === "ENOENT" ||
-            cause.code === "EINVAL" ||
-            cause.code === "EBADF")
-        )
+        if (cause instanceof Error && "code" in cause && cause.code === "EBADF")
           return false;
         throw cause;
       }
@@ -77,6 +68,9 @@ it.skipIf(process.platform === "win32")(
       await writeFile(path, "captured file\n");
       const expected = await lstat(path);
       const controller = new AbortController();
+      const held = await open(path, "r");
+      expect(await countOpenDescriptorsFor(path)).toBe(1);
+      await held.close();
       expect(await countOpenDescriptorsFor(path)).toBe(0);
       const hashing = hashFile(path, expected, 1_000, controller.signal);
       // hashFile reaches `open` synchronously before its first suspension, so
