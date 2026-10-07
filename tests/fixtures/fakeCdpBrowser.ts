@@ -92,6 +92,11 @@ export const startFakeCdpBrowser = async (
     socket.on("message", (raw) => {
       const command = parseCommand(raw.toString());
       commands.push(command);
+      const commandError = options.commandError?.(command);
+      if (commandError !== undefined) {
+        socket.send(JSON.stringify({ id: command.id, error: commandError }));
+        return;
+      }
       if (options.closeOnMethod === command.method) {
         socket.close();
         return;

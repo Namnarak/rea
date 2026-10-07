@@ -16,6 +16,11 @@ import {
   runtimeScriptParsedSchema,
 } from "./CdpRuntimeProtocol.js";
 
+const scriptIdentitySchema = runtimeScriptParsedSchema.pick({ scriptId: true });
+const contextIdentitySchema = z.object({
+  context: runtimeContextSchema.shape.context.pick({ id: true }),
+});
+
 /** Source ownership is proven by execution context/frame metadata, independently of URL aliases. */
 export class CdpRuntimeSources {
   readonly scripts = new Map<
@@ -27,6 +32,7 @@ export class CdpRuntimeSources {
     z.infer<typeof runtimeContextSchema>["context"]
   >();
   readonly #changed = new Set<string>();
+  readonly #changedContexts = new Set<number>();
   readonly #sources = new Map<string, WebRuntimeSource>();
   #retainedBytes = 0;
   #sourceBytes = 0;
@@ -34,7 +40,7 @@ export class CdpRuntimeSources {
   constructor(readonly session: CdpRuntimeSession) {}
 
   /** Subscribe before enabling Debugger; existing uncollected scripts are replayed by the producer. */
-  ingest(event: CdpEvent): void {
+  ingest(event: CdpEvent, retainNewMetadata = true): void {
     if (
       event.sessionId !== this.session.transport.sessionId ||
       this.#failure !== undefined
@@ -48,7 +54,16 @@ export class CdpRuntimeSources {
             "Context/script metadata exceeds the complete 8 MiB event budget.",
           );
         const context = runtimeContextSchema.parse(event.params).context;
-        this.#contexts.set(context.id, context);
+        const previous = this.#contexts.get(context.id);
+        if (
+          previous !== undefined &&
+          JSON.stringify(previous) !== JSON.stringify(context)
+        ) {
+          this.#changedContexts.add(context.id);
+          for (const item of this.#sources.values())
+            if (item.execution_context_id === context.id) this.revalidate(item);
+        }
+        if (retainNewMetadata) this.#contexts.set(context.id, context);
       } else if (event.method === "Debugger.scriptParsed") {
         this.#retainedBytes += Buffer.byteLength(JSON.stringify(event.params));
         if (this.#retainedBytes > WEB_RUNTIME_LIMITS.retainedEventBytes)
@@ -60,9 +75,12 @@ export class CdpRuntimeSources {
         if (
           previous !== undefined &&
           JSON.stringify(previous) !== JSON.stringify(script)
-        )
+        ) {
           this.#changed.add(script.scriptId);
-        this.scripts.set(script.scriptId, script);
+          const retained = this.#sources.get(script.scriptId);
+          if (retained !== undefined) this.revalidate(retained);
+        }
+        if (retainNewMetadata) this.scripts.set(script.scriptId, script);
       }
     } catch (cause: unknown) {
       this.#failure = new AnalysisOutputError(
@@ -77,10 +95,28 @@ export class CdpRuntimeSources {
     if (this.#failure !== undefined) throw this.#failure;
   }
 
+  /** Frozen inventories still monitor known identities through asynchronous source reads. */
+  verifyKnownIdentity(event: CdpEvent): void {
+    if (event.method === "Debugger.scriptParsed") {
+      const id = scriptIdentitySchema.safeParse(event.params);
+      if (id.success && this.scripts.has(id.data.scriptId))
+        this.ingest(event, false);
+    } else if (event.method === "Runtime.executionContextCreated") {
+      const id = contextIdentitySchema.safeParse(event.params);
+      if (id.success && this.#contexts.has(id.data.context.id))
+        this.ingest(event, false);
+    }
+  }
+
   /** Only proven default worlds of the selected main frame establish website source ownership. */
   belongsToDocument(scriptId: string): boolean {
     const script = this.scripts.get(scriptId);
-    if (script === undefined || this.#changed.has(scriptId)) return false;
+    if (
+      script === undefined ||
+      this.#changed.has(scriptId) ||
+      this.#changedContexts.has(script.executionContextId)
+    )
+      return false;
     const scriptContext = script.executionContextAuxData;
     const context = this.#contexts.get(script.executionContextId)?.auxData;
     const worlds = [scriptContext, context];
@@ -153,6 +189,7 @@ export class CdpRuntimeSources {
           reason:
             "WebAssembly bytecode is outside this JavaScript source operation.",
         };
+      this.revalidate(item);
       this.#sources.set(scriptId, item);
     }
     this.check();
@@ -185,6 +222,20 @@ export class CdpRuntimeSources {
       this.scripts.get(scriptId)?.hasSourceURL === false
       ? sanitizeBrowserUrl(url).url
       : url;
+  }
+
+  private revalidate(item: WebRuntimeSource): void {
+    if (item.frame_id === null || this.belongsToDocument(item.script_id))
+      return;
+    const previous =
+      item.source.state === "unavailable"
+        ? ` Previous source read failure: ${item.source.reason}`
+        : "";
+    item.frame_id = null;
+    item.source = {
+      state: "excluded",
+      reason: `The script or context changed identity during source collection; attribution is unknown.${previous}`,
+    };
   }
 
   private async capture(scriptId: string): Promise<WebRuntimeSource["source"]> {

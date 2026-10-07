@@ -6,6 +6,7 @@ import type {
 } from "../../domain/webEventListeners.js";
 import type { CdpRuntimeSources } from "./CdpRuntimeSources.js";
 import { runtimeListenersSchema } from "./CdpRuntimeProtocol.js";
+import { queryListenerSelector } from "./CdpListenerSelector.js";
 
 /** Inspect native DOM listener descriptors without evaluating JavaScript or invoking handlers. */
 export const captureWebEventListeners = async (
@@ -25,12 +26,15 @@ export const captureWebEventListeners = async (
     const document = z
       .object({ root: z.object({ nodeId: z.number().int().min(1) }) })
       .parse(await session.command("DOM.getDocument", { depth: 0 }));
-    const selected = z.object({ nodeId: z.number().int().min(0) }).parse(
-      await session.command("DOM.querySelector", {
-        nodeId: document.root.nodeId,
-        selector: input.selector,
-      }),
-    );
+    const selected = z
+      .object({ nodeId: z.number().int().min(0) })
+      .parse(
+        await queryListenerSelector(
+          session,
+          document.root.nodeId,
+          input.selector,
+        ),
+      );
     let backendNodeId: number | null = null;
     let descriptors: z.infer<typeof runtimeListenersSchema>["listeners"] = [];
     if (selected.nodeId !== 0) {

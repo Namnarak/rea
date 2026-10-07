@@ -26,6 +26,8 @@ export class CdpExecutionCollection {
               this.window.reason === "window_elapsed")
           )
             sources.ingest(event);
+          else if (this.window.reason === "window_elapsed")
+            sources.verifyKnownIdentity(event);
           if (this.window.active) this.requests.ingest(event);
           sources.check();
           this.requests.check();

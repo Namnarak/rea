@@ -21,6 +21,7 @@ import {
   closeRuntimeFixtureResources,
 } from "./browser-runtime-fixture-lifecycle.mjs";
 import { verifyRuntimeTargetTermination } from "./browser-runtime-termination-e2e.mjs";
+import { verifyRuntimeInvalidSelectors } from "./browser-runtime-selector-e2e.mjs";
 import {
   createRuntimeIsolatedWorld,
   triggerRuntimeFixtureAction,
@@ -109,6 +110,12 @@ export async function verifyBrowserRuntime(
     });
     client = new Client({ name: "web-runtime-real-e2e", version: "1" });
     await client.connect(transport);
+    const invalidSelectors = await verifyRuntimeInvalidSelectors(
+      client,
+      entrypoint,
+      input,
+      env,
+    );
     const listenerResponse = await client.callTool({
       name: "inspect_web_event_listeners",
       arguments: { ...input, selector: "#run" },
@@ -169,7 +176,8 @@ export async function verifyBrowserRuntime(
       cli: cliProof,
       mcp: mcpProof,
       listener: cliListenerProof,
-      public_cases: 6,
+      public_cases: 8,
+      invalid_selectors: invalidSelectors,
       termination,
       fresh_mcp: freshMcpProof,
       page_remained_open: true,

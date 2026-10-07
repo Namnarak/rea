@@ -89,6 +89,10 @@ export const captureWebExecution = async (
     const retained = await sources.read(ids);
     if (reason === "window_elapsed") await session.assertDocument();
     sources.check();
+    const verifiedRequests = requests.result();
+    const verifiedMainScripts = mainScripts.filter((id) =>
+      sources.belongsToDocument(id),
+    );
     const sample =
       raw === undefined
         ? undefined
@@ -119,11 +123,11 @@ export const captureWebExecution = async (
         scripts: [],
         excluded_scripts: 0,
       },
-      requests: requestItems,
+      requests: verifiedRequests,
       excluded_requests: requests.excluded,
       script_inventory: {
-        main_document_scripts: mainScripts.length,
-        not_reported_script_ids: mainScripts.filter(
+        main_document_scripts: verifiedMainScripts.length,
+        not_reported_script_ids: verifiedMainScripts.filter(
           (id) => !reportedIds.has(id),
         ),
         coverage_absence: "unknown",
@@ -145,7 +149,7 @@ export const captureWebExecution = async (
         "Previously parsed scripts may be absent from a precise sample. Their source inventory is retained, but missing coverage never means zero execution or an unexecuted function.",
         "A detailed-coverage request does not guarantee block granularity for already compiled functions. When is_block_coverage is false, branch execution is unknown; REA preserves the function-only producer ranges.",
         "The local armed/end clock and backend coverage timestamps are distinct clocks. Counters start when the backend accepts instrumentation, before the armed receipt, and end at the resetting sample after the requested window. Counts may include execution during those command intervals; requests are restricted to the locally armed window.",
-        "Source metadata is collected through the final resetting sample, then frozen for source joins; scripts parsed after that cutoff are outside this evidence.",
+        "Source metadata is collected through the final resetting sample, then frozen for source joins. Known identities remain checked during asynchronous source completion; newly parsed scripts after that cutoff are outside this evidence.",
         "Request callsites are producer-reported initiators associated by session script ID; they do not establish UI causality. Unresolved asynchronous parent IDs are retained without fetching their stacks.",
         "Producer hashes and UTF-8 digests of retained text are distinct identities. Inline script locations use reported resource offsets; anonymous/eval/sourceURL names are declarations.",
         "Metadata has an 8 MiB script budget and 8 MiB request budget; complete retained sources have a 32 MiB budget. Resource failures return no partial success. The externally owned browser's CPU and memory are not controlled by REA.",

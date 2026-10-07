@@ -27,6 +27,10 @@ export interface FakeCdpBrowser {
 }
 
 export interface FakeOptions {
+  /** Return a native-shaped command rejection through the actual wire parser. */
+  readonly commandError?: (
+    command: FakeCdpCommand,
+  ) => { readonly code: number; readonly message: string } | undefined;
   /** Producer reply seam preserves the real HTTP/WebSocket transport and command parser. */
   readonly commandResult?: (
     command: FakeCdpCommand,

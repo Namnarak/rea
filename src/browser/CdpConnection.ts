@@ -3,6 +3,7 @@ import WebSocket, { type RawData } from "ws";
 import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
 import { AnalysisError } from "../domain/analysisErrorBase.js";
 import { BrowserObservationError } from "../domain/browserObservationError.js";
+import { CdpCommandRejection } from "./CdpCommandRejection.js";
 import { type BrowserObservationOperation } from "../domain/browserObservationErrors.js";
 import { safeParseJson } from "../domain/safeJson.js";
 
@@ -213,14 +214,17 @@ export class CdpConnection {
     this.#complete(id, pending);
     if ("error" in message) {
       const reported = message.error;
-      const detail =
-        isRecord(reported) && typeof reported.message === "string"
-          ? `CDP ${pending.method} failed (${typeof reported.code === "number" ? String(reported.code) : "unknown code"}): ${reported.message}`
-          : "CDP returned a malformed command error.";
       pending.reject(
-        new BrowserObservationError(this.operation, "protocol_error", {
-          detail,
-        }),
+        new CdpCommandRejection(
+          this.operation,
+          pending.method,
+          isRecord(reported) && typeof reported.code === "number"
+            ? reported.code
+            : null,
+          isRecord(reported) && typeof reported.message === "string"
+            ? reported.message
+            : null,
+        ),
       );
       return;
     }
