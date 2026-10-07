@@ -55,3 +55,5 @@ Each protocol message has a 64 MiB budget; script/context metadata and request m
 Real workflow coverage is Linux x64 / Chrome 153 / Node 24. Other browser engines and host workflows remain unverified. The conditional `real-web-runtime` CI lane acquires Chrome only for relevant changes; ordinary unit/static checks need no browser.
 
 Primary protocol references: [Profiler and Debugger](https://raw.githubusercontent.com/ChromeDevTools/devtools-protocol/master/pdl/js_protocol.pdl), [DOMDebugger](https://raw.githubusercontent.com/ChromeDevTools/devtools-protocol/master/pdl/domains/DOMDebugger.pdl).
+
+Source ownership requires both the selected main frame and producer evidence for its default execution world. Extension/automation isolated worlds, worker worlds and unknown worlds cannot establish website source joins. Contradictory world metadata stays unowned. Referenced source records retain the reported execution context and script auxiliary context metadata; source text is read only for proven main-document default worlds.

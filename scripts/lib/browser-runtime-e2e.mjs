@@ -21,6 +21,11 @@ import {
   closeRuntimeFixtureResources,
 } from "./browser-runtime-fixture-lifecycle.mjs";
 import { verifyRuntimeTargetTermination } from "./browser-runtime-termination-e2e.mjs";
+import {
+  createRuntimeIsolatedWorld,
+  triggerRuntimeFixtureAction,
+  isolatedFixtureUrl,
+} from "./browser-runtime-world-e2e.mjs";
 
 /** Exercise native browser runtime attribution through public CLI and stdio MCP, including arming. */
 export async function verifyBrowserRuntime(
@@ -62,6 +67,7 @@ export async function verifyBrowserRuntime(
       "inspect_web_page",
     );
     await ready(action);
+    let isolatedContext = await createRuntimeIsolatedWorld(action);
     const env = {
       ...process.env,
       REA_LOG_LEVEL: "silent",
@@ -84,7 +90,13 @@ export async function verifyBrowserRuntime(
       parseEvidence(JSON.parse(cliListener.stdout)),
       site,
     );
-    const cliExecution = await executionCli(entrypoint, input, env, action);
+    const cliExecution = await executionCli(
+      entrypoint,
+      input,
+      env,
+      action,
+      isolatedContext,
+    );
     const cliProof = assertExecution(
       parseEvidence(JSON.parse(cliExecution)),
       site,
@@ -110,11 +122,25 @@ export async function verifyBrowserRuntime(
       parseEvidence(JSON.parse(mcpTextValue(listenerResponse)).evidence),
       site,
     );
-    const mcpProof = await executionMcp(client, input, action, site, false);
+    const mcpProof = await executionMcp(
+      client,
+      input,
+      action,
+      site,
+      isolatedContext,
+      false,
+    );
     assert.equal(cliProof.selected_sha256, mcpProof.selected_sha256);
     assert.equal(cliListenerProof.sha256, mcpListenerProof.sha256);
     await reloadFixture(action);
-    const freshMcpProof = await executionMcp(client, input, action, site);
+    isolatedContext = await createRuntimeIsolatedWorld(action);
+    const freshMcpProof = await executionMcp(
+      client,
+      input,
+      action,
+      site,
+      isolatedContext,
+    );
     assert.equal(site.evidenceRequests(), 3);
     const termination = await verifyRuntimeTargetTermination(
       client,
@@ -164,7 +190,14 @@ export async function verifyBrowserRuntime(
   }
 }
 
-async function executionMcp(client, input, action, site, requireBlock = true) {
+async function executionMcp(
+  client,
+  input,
+  action,
+  site,
+  isolatedContext,
+  requireBlock = true,
+) {
   let actionPromise;
   const response = await client.callTool(
     {
@@ -180,9 +213,7 @@ async function executionMcp(client, input, action, site, requireBlock = true) {
             "browser_execution: Browser execution observation armed",
           )
         ) {
-          actionPromise = action.send("Runtime.evaluate", {
-            expression: "document.querySelector('#run').click()",
-          });
+          actionPromise = triggerRuntimeFixtureAction(action, isolatedContext);
           void actionPromise.catch(() => undefined);
         }
       },
@@ -211,7 +242,7 @@ async function ready(connection) {
   throw new Error("Runtime fixture sources did not load");
 }
 
-async function executionCli(entrypoint, input, env, action) {
+async function executionCli(entrypoint, input, env, action, isolatedContext) {
   const child = spawn(
     process.execPath,
     [
@@ -235,9 +266,7 @@ async function executionCli(entrypoint, input, env, action) {
   child.stderr.on("data", (chunk) => {
     stderr += chunk;
     if (actionPromise === undefined && stderr.includes('"completed":1')) {
-      actionPromise = action.send("Runtime.evaluate", {
-        expression: "document.querySelector('#run').click()",
-      });
+      actionPromise = triggerRuntimeFixtureAction(action, isolatedContext);
       void actionPromise.catch(() => undefined);
     }
   });
@@ -274,20 +303,32 @@ function assertListeners(evidence, site) {
     1,
     "The selected node's child listener must not be attributed to the selected node",
   );
-  assert.equal(result.listeners[0].type, "click");
-  assert.equal(result.listeners[0].passive, true);
+  const listener = result.listeners.find((item) => item.type === "click");
+  assert.ok(listener);
+  assert.equal(listener.passive, true);
   const source = sourceByText(result, site.sources.selected);
-  assert.equal(result.listeners[0].location.script_id, source.script_id);
-  assert.equal(result.listeners[0].location.source_association, "script_id");
-  assert.equal(result.listeners[0].execution, "unknown");
+  assert.equal(listener.location.script_id, source.script_id);
+  assert.equal(listener.location.source_association, "script_id");
+  assert.equal(listener.execution, "unknown");
   return {
     sha256: source.source.sha256,
-    line: result.listeners[0].location.line_number,
-    column: result.listeners[0].location.column_number,
+    line: listener.location.line_number,
+    column: listener.location.column_number,
   };
 }
 function assertExecution(evidence, site, requireBlock = true) {
   const result = webExecutionSchema.parse(evidence.normalized_result);
+  assert.ok(
+    result.coverage.scripts.every(
+      (item) => item.reported_url !== isolatedFixtureUrl,
+    ),
+  );
+  assert.ok(
+    result.sources.every(
+      (item) =>
+        item.url !== isolatedFixtureUrl || item.source.state !== "captured",
+    ),
+  );
   const selected = sourceByText(result, site.sources.selected);
   const other = sourceByText(result, site.sources.other);
   assert.equal(selected.url, other.url);
@@ -361,6 +402,7 @@ function assertExecution(evidence, site, requireBlock = true) {
     same_document_navigation: true,
     declared_source_url_preserved: true,
     request_script_id: selected.script_id,
+    isolated_execution_proved_and_excluded: true,
   };
 }
 

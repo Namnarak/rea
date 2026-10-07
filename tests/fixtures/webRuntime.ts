@@ -121,7 +121,18 @@ const runtimeEvents = (command: FakeCdpCommand, origin: string) => {
       {
         ...session,
         method: "Runtime.executionContextCreated",
-        params: { context: { id: 1, auxData: { frameId: "runtime-main" } } },
+        params: {
+          context: {
+            id: 1,
+            origin,
+            name: "",
+            auxData: {
+              frameId: "runtime-main",
+              isDefault: true,
+              type: "default",
+            },
+          },
+        },
       },
     ];
   if (command.method !== "Debugger.enable") return [];

@@ -4,6 +4,7 @@ import {
   browserEndpointSchema,
 } from "./browserObservation.js";
 import { browserVersionSchema } from "./browserObservationSchemas.js";
+import { jsonObjectSchema } from "./jsonValue.js";
 
 /** Scope for one externally owned page; omitted origins select its current origin. */
 export const webRuntimeScopeSchema = z.strictObject({
@@ -17,6 +18,8 @@ export const webRuntimeSourceSchema = z.object({
   script_id: z.string().min(1),
   url: z.string(),
   execution_context_id: z.number().int().nullable(),
+  reported_execution_context: jsonObjectSchema.nullable(),
+  reported_script_context_aux_data: jsonObjectSchema.nullable(),
   frame_id: z.string().nullable(),
   producer_hash: z.string().nullable(),
   source_map_url: z.string().nullable(),

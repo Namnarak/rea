@@ -3,6 +3,7 @@ import { z } from "zod";
 import { AnalysisError } from "../../domain/analysisErrorBase.js";
 import { AnalysisOutputError } from "../../domain/analysisErrorCore.js";
 import { sanitizeBrowserUrl } from "../../domain/browserObservation.js";
+import { jsonObjectSchema } from "../../domain/jsonValue.js";
 import {
   WEB_RUNTIME_LIMITS,
   type WebRuntimeSource,
@@ -21,7 +22,10 @@ export class CdpRuntimeSources {
     string,
     z.infer<typeof runtimeScriptParsedSchema>
   >();
-  readonly #contexts = new Map<number, string>();
+  readonly #contexts = new Map<
+    number,
+    z.infer<typeof runtimeContextSchema>["context"]
+  >();
   readonly #changed = new Set<string>();
   readonly #sources = new Map<string, WebRuntimeSource>();
   #retainedBytes = 0;
@@ -44,8 +48,7 @@ export class CdpRuntimeSources {
             "Context/script metadata exceeds the complete 8 MiB event budget.",
           );
         const context = runtimeContextSchema.parse(event.params).context;
-        if (context.auxData?.frameId !== undefined)
-          this.#contexts.set(context.id, context.auxData.frameId);
+        this.#contexts.set(context.id, context);
       } else if (event.method === "Debugger.scriptParsed") {
         this.#retainedBytes += Buffer.byteLength(JSON.stringify(event.params));
         if (this.#retainedBytes > WEB_RUNTIME_LIMITS.retainedEventBytes)
@@ -74,17 +77,31 @@ export class CdpRuntimeSources {
     if (this.#failure !== undefined) throw this.#failure;
   }
 
-  /** Only the selected page's main document contexts establish source ownership. */
+  /** Only proven default worlds of the selected main frame establish website source ownership. */
   belongsToDocument(scriptId: string): boolean {
     const script = this.scripts.get(scriptId);
     if (script === undefined || this.#changed.has(scriptId)) return false;
-    const reported = script.executionContextAuxData?.frameId;
-    const context = this.#contexts.get(script.executionContextId);
+    const scriptContext = script.executionContextAuxData;
+    const context = this.#contexts.get(script.executionContextId)?.auxData;
+    const worlds = [scriptContext, context];
+    if (
+      worlds.some(
+        (world) =>
+          world?.isDefault === false ||
+          (world?.type !== undefined && world.type !== "default"),
+      ) ||
+      !worlds.some(
+        (world) => world?.isDefault === true || world?.type === "default",
+      )
+    )
+      return false;
+    const reported = scriptContext?.frameId;
+    const contextFrame = context?.frameId;
     return (
       (reported === undefined ||
-        context === undefined ||
-        reported === context) &&
-      (reported ?? context) === this.session.target.frame_id
+        contextFrame === undefined ||
+        reported === contextFrame) &&
+      (reported ?? contextFrame) === this.session.target.frame_id
     );
   }
 
@@ -95,10 +112,20 @@ export class CdpRuntimeSources {
       if (this.#sources.has(scriptId)) continue;
       const script = this.scripts.get(scriptId);
       const owned = this.belongsToDocument(scriptId);
+      const context =
+        script === undefined
+          ? undefined
+          : this.#contexts.get(script.executionContextId);
       const item: WebRuntimeSource = {
         script_id: scriptId,
         url: this.sourceUrl(scriptId, script?.url ?? ""),
         execution_context_id: script?.executionContextId ?? null,
+        reported_execution_context:
+          context === undefined ? null : jsonObjectSchema.parse(context),
+        reported_script_context_aux_data:
+          script?.executionContextAuxData === undefined
+            ? null
+            : jsonObjectSchema.parse(script.executionContextAuxData),
         frame_id: owned ? this.session.target.frame_id : null,
         producer_hash: script?.hash ?? null,
         source_map_url: script?.sourceMapURL ?? null,
@@ -115,7 +142,7 @@ export class CdpRuntimeSources {
           state: "excluded",
           reason: this.#changed.has(scriptId)
             ? "The script changed identity during observation; source attribution is unknown."
-            : "Selected main-document context ownership was not established.",
+            : "Selected main-document default-world ownership was not established.",
         },
       };
       if (owned && script?.scriptLanguage !== "WebAssembly")
