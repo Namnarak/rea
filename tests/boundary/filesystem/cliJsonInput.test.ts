@@ -22,6 +22,12 @@ describe("CLI JSON input", () => {
       ok: true,
       value: { value: 1 },
     });
+    const bracketPath = join(root, "[input].json");
+    await writeFile(bracketPath, '["preserved"]');
+    expect(await parseCliJsonInput(bracketPath, "test-input")).toEqual({
+      ok: true,
+      value: ["preserved"],
+    });
     expect(await parseCliJsonInput(root, "test-input")).toMatchObject({
       ok: false,
       error: { input_reason: "read-failed" },
