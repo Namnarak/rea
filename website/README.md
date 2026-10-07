@@ -1,6 +1,6 @@
 # REA website
 
-An English static website with explanatory figures, worked guides and a DX-Ball investigation.
+An English static website with explanatory figures, worked guides and DX-Ball and Notion investigations.
 The public files are in `website/public/`. The site uses HTML, CSS and a small
 script for copying code and following the assembly-to-C comparison; it has no
 build step or npm dependencies.
@@ -17,8 +17,10 @@ Open <http://127.0.0.1:4173/>. Refresh the browser after editing a file.
 
 ## Pages
 
-- `public/index.html`: product introduction and DX-Ball overview.
+- `public/index.html`: product introduction and case-study overviews.
+- `public/showcase/index.html`: the case-study index.
 - `public/showcase/dx-ball/index.html`: sound-pan investigation and project status.
+- `public/showcase/notion/index.html`: Notion's Electron clipboard bridge and rich clipboard format.
 - `public/get-started/index.html`: agent setup, first CLI result and provider guides.
 - `public/guides/`: a guide hub and native, JavaScript/Electron and browser examples.
 - `public/examples/`: downloadable Electron source and an interactive Notes browser app.
@@ -62,6 +64,15 @@ screens, the diagrams scroll horizontally and can also be opened at full size.
 The worked guides use semantic HTML flows that stack vertically on smaller
 screens. The Electron teaching example uses CommonJS, matching its preload
 code; the scoped lint override admits `require` only in that example directory.
+
+The Notion case follows the same HTML figure style. Its short excerpts explain
+the packaged clipboard bridge; separate web-cache probes illustrate the rich
+clipboard and Markdown formats. Only selected source details and generic
+example data belong on the site. Machine paths, account identifiers, local
+configuration, complete vendor bundles and raw captured results stay outside
+the website.
+[evidence/notion-clipboard.md](evidence/notion-clipboard.md) records the REA
+package version, selected findings, source anchors and module-probe scope.
 
 ## GitHub Pages
 
