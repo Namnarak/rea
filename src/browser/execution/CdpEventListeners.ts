@@ -64,6 +64,7 @@ export const captureWebEventListeners = async (
         .filter((id) => id.length > 0),
     );
     await session.assertDocument();
+    sources.check();
     return {
       browser: session.discovery.version,
       target: session.target,

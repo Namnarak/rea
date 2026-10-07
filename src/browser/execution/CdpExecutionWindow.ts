@@ -98,6 +98,10 @@ export class CdpExecutionWindow {
     this.dispose();
     this.#reject?.(error);
   }
+  /** Surface a failure recorded before local arming without emitting misleading progress. */
+  check(): void {
+    if (this.#failure !== undefined) throw this.#failure;
+  }
   /** Release local timer and abort listener on every setup/failure path. */
   dispose(): void {
     if (this.#timer !== undefined) clearTimeout(this.#timer);

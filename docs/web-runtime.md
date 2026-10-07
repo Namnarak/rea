@@ -24,6 +24,8 @@ Results retain:
 
 The coverage counter interval starts at backend acceptance before the armed receipt and ends at the resetting sample after the local timer. Counts may include execution during these command intervals; request events are restricted to the locally armed window. The result retains both backend timestamps and the distinct local clock.
 
+Source metadata remains collected through receipt of the resetting sample, including scripts parsed during the final command. REA then freezes this inventory for source joins. Fatal protocol parsing failures terminate the observer even when no command is outstanding; listener inspection checks producer failures after its final document assertion.
+
 A document replacement ends the window; final coverage then remains unavailable. Missing coverage is unknown: an already loaded script may be absent from a sample. A detailed request also does not guarantee block granularity for already compiled functions. If `is_block_coverage` is false, the function-only ranges are observed and branch execution remains unknown. Native Chrome verification reproduced block coverage in the first window and function-only coverage in a subsequent window, including without REA.
 
 Same-document navigation such as `history.pushState()` remains valid when the frame and known loader identity stay stable and the current origin is allowed. Unknown loader identity retains a conservative URL check; newly reported or replaced loaders are rejected. Malformed producer events end an armed window immediately and trigger cleanup, independently of the selected duration.

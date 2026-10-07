@@ -24,6 +24,9 @@ export class CdpConnection {
   readonly #pending = new Map<number, PendingCommand>();
   readonly #listeners = new Set<(event: CdpEvent) => void>();
   readonly #disconnectListeners = new Set<() => void>();
+  readonly #protocolFailureListeners = new Set<
+    (error: BrowserObservationError) => void
+  >();
   #nextId = 1;
   #closed = false;
   #protocolFailed = false;
@@ -76,6 +79,18 @@ export class CdpConnection {
     }
     this.#disconnectListeners.add(listener);
     return () => this.#disconnectListeners.delete(listener);
+  }
+
+  /** Notify fatal wire parsing failure even when no command is outstanding. */
+  onProtocolFailure(
+    listener: (error: BrowserObservationError) => void,
+  ): () => void {
+    if (this.#protocolFailed) {
+      listener(this.#transportError("protocol_error"));
+      return () => undefined;
+    }
+    this.#protocolFailureListeners.add(listener);
+    return () => this.#protocolFailureListeners.delete(listener);
   }
 
   /** Execute one command, optionally within a flat target session. */
@@ -150,6 +165,7 @@ export class CdpConnection {
   }
 
   #receive(data: RawData): void {
+    if (this.#closed || this.#protocolFailed) return;
     const parsed = safeParseJson(rawText(data));
     if (!parsed.ok) {
       this.#failPending("protocol_error");
@@ -219,11 +235,17 @@ export class CdpConnection {
   #failPending(
     reason: "disconnected" | "protocol_error" | "payload_limit",
   ): void {
+    const wasProtocolFailed = this.#protocolFailed;
     if (reason !== "protocol_error") this.#closed = true;
     else this.#protocolFailed = true;
     for (const [id, pending] of this.#pending) {
       this.#complete(id, pending);
       pending.reject(this.#transportError(reason));
+    }
+    if (reason === "protocol_error" && !wasProtocolFailed) {
+      const error = this.#transportError(reason);
+      for (const listener of this.#protocolFailureListeners) listener(error);
+      this.#protocolFailureListeners.clear();
     }
   }
 

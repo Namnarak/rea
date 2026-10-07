@@ -10,6 +10,8 @@ export interface FakeCdpBrowser {
   readonly browserWebSocketUrl: string;
   readonly allowedOrigin: string;
   readonly commands: readonly FakeCdpCommand[];
+  /** Deliver actual malformed wire data without bypassing the production transport parser. */
+  emitRawMessage(message: string): void;
   emitEvent(event: {
     readonly method: string;
     readonly params: unknown;
