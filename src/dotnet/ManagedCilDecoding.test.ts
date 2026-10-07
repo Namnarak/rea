@@ -79,6 +79,60 @@ describe("managed CIL decoding", () => {
     });
   });
 
+  it("does not decode overlay bytes after the method's file-backed PE section", () => {
+    const original = buildManagedPeFixture();
+    const bytes = Buffer.concat([original, Buffer.from([0x2a])]);
+    const parsed = inspectManagedMembersBytes(
+      original,
+      managedPeFixtureTarget(original),
+    );
+    const methodRow = parsed.methods[0]?.row_offset;
+    expect(methodRow).toBeDefined();
+    if (methodRow === undefined) return;
+    bytes.writeUInt32LE(0x2dff, methodRow);
+    bytes[0xfff] = 0x06;
+    const result = inspectManagedMembersBytes(
+      bytes,
+      managedPeFixtureTarget(bytes),
+    );
+    expect(result.methods[0]?.body).toMatchObject({
+      status: "malformed",
+      header_format: "unknown",
+      issue: "Method body leaves file-backed PE section data",
+      anchors: [],
+    });
+  });
+
+  it("does not decode overlay exception sections after the file-backed PE section", () => {
+    const original = buildManagedPeFixture();
+    const overlay = Buffer.from([0x01, 0x04, 0x00, 0x00]);
+    const bytes = Buffer.concat([original, overlay]);
+    const parsed = inspectManagedMembersBytes(
+      original,
+      managedPeFixtureTarget(original),
+    );
+    const methodRow = parsed.methods[0]?.row_offset;
+    expect(methodRow).toBeDefined();
+    if (methodRow === undefined) return;
+    const body = Buffer.alloc(16);
+    body.writeUInt16LE(0x301b, 0);
+    body.writeUInt16LE(8, 2);
+    body.writeUInt32LE(1, 4);
+    body[12] = 0x2a;
+    body.copy(bytes, 0xff0);
+    bytes.writeUInt32LE(0x2df0, methodRow);
+    overlay.copy(bytes, 0x1000);
+    const result = inspectManagedMembersBytes(
+      bytes,
+      managedPeFixtureTarget(bytes),
+    );
+    expect(result.methods[0]?.body).toMatchObject({
+      status: "malformed",
+      issue: "Exception section header leaves artifact",
+      exception_regions: [],
+    });
+  });
+
   it("keeps the documented decoded-CIL v1 golden vector stable", () => {
     const il = Buffer.from([0x00, 0x2a]);
     const tinyBytes = buildManagedPeFixture({
