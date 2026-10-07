@@ -21,6 +21,22 @@ const runCapture = async (cli: TestCli, steps: string | undefined) => {
 };
 
 describe("native UI scenario CLI input", () => {
+  cliTest(
+    "rejects omitted steps under the shared scenario contract",
+    async ({ cli }) => {
+      const result = await runCapture(cli, undefined);
+
+      expect(result.exitCode).not.toBe(0);
+      expect(result.json).toMatchObject({
+        code: "invalid_request",
+        details: {
+          operation: "capture-native-ui-scenario",
+          issues: [{ path: ["steps"], reason: "missing_argument" }],
+        },
+      });
+    },
+  );
+
   cliTest("rejects malformed JSON as invalid input", async ({ cli }) => {
     const result = await runCapture(cli, "[");
 
