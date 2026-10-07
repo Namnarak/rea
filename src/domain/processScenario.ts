@@ -16,7 +16,10 @@ const environmentName = z
   });
 const childProcessString = z
   .string()
-  .regex(/^[^\0]*$/u, "Values passed to operating-system APIs cannot contain NUL");
+  .regex(
+    /^[^\0]*$/u,
+    "Values passed to operating-system APIs cannot contain NUL",
+  );
 export const normalizationSchema = z.object({
   paths: z.boolean(),
   pids: z.boolean(),

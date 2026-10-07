@@ -182,7 +182,7 @@ describe("process CLI errors", () => {
       category: "invalid_input",
       details: {
         operation: "capture_process_scenario",
-        issues: [{ path: ["arguments", 0], reason: "invalid_value" }],
+        issues: [{ path: ["arguments", 0], reason: "invalid_format" }],
       },
     });
   });
