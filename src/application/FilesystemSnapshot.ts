@@ -45,6 +45,7 @@ export const hashFile = async (
   maxBytes: number,
   signal?: AbortSignal,
 ): Promise<string | null> => {
+  signal?.throwIfAborted();
   const handle = await open(
     path,
     fsConstants.O_RDONLY |
@@ -52,7 +53,9 @@ export const hashFile = async (
       (fsConstants.O_NONBLOCK ?? 0),
   );
   try {
+    signal?.throwIfAborted();
     const stats = await handle.stat();
+    signal?.throwIfAborted();
     if (!hasSameFileState(expected, stats) || stats.size > maxBytes)
       return null;
     const hash = createHash("sha256");
@@ -71,6 +74,7 @@ export const hashFile = async (
       position += bytesRead;
     }
     const after = await handle.stat();
+    signal?.throwIfAborted();
     if (!hasSameFileState(stats, after)) return null;
     return hash.digest("hex");
   } finally {

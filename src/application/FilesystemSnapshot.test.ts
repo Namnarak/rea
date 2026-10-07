@@ -21,11 +21,11 @@ it("does not hash a replacement file using the earlier path metadata", async () 
   }
 });
 
-it("closes the opened file when a snapshot is cancelled during hashing", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rea-snapshot-cancel-"));
+it("rejects cancellation for an empty file before returning its digest", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "rea-snapshot-empty-cancel-"));
   const path = join(directory, "observed-file");
   try {
-    await writeFile(path, "captured file\n");
+    await writeFile(path, "");
     const expected = await lstat(path);
     const controller = new AbortController();
     controller.abort();
@@ -33,6 +33,25 @@ it("closes the opened file when a snapshot is cancelled during hashing", async (
     await expect(
       hashFile(path, expected, 1_000, controller.signal),
     ).rejects.toMatchObject({ name: "AbortError" });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("closes the opened file when cancellation arrives during open", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "rea-snapshot-cancel-"));
+  const path = join(directory, "observed-file");
+  try {
+    await writeFile(path, "captured file\n");
+    const expected = await lstat(path);
+    const controller = new AbortController();
+    const hashing = hashFile(path, expected, 1_000, controller.signal);
+    // hashFile reaches `open` synchronously before its first suspension, so
+    // this abort is observed after the descriptor is acquired and is handled
+    // by the `finally` close path.
+    controller.abort();
+
+    await expect(hashing).rejects.toMatchObject({ name: "AbortError" });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
