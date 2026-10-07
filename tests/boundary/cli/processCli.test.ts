@@ -168,6 +168,25 @@ describe("process CLI errors", () => {
     });
   });
 
+  it("rejects NUL arguments before process launch", async () => {
+    const root = await fixture();
+    const scenario = join(root, "nul-argument.json");
+    await writeFile(
+      scenario,
+      JSON.stringify({ executable: process.execPath, arguments: ["\0"] }),
+    );
+
+    expect(await captureProcessScenarioFile(scenario)).toMatchObject({
+      error: "Process command failed",
+      code: "invalid_request",
+      category: "invalid_input",
+      details: {
+        operation: "capture_process_scenario",
+        issues: [{ path: ["arguments", 0], reason: "invalid_value" }],
+      },
+    });
+  });
+
   it("captures the minimal executable-and-arguments scenario", async () => {
     const root = await fixture();
     const scenario = join(root, "scenario.json");
