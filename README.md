@@ -46,6 +46,18 @@
 
 </div>
 
+<!-- CYTECH_README_REFRESH:START -->
+<p align="center"><img alt="Reverse-engineering MCP tools section accent" width="100%" height="10" src="https://capsule-render.vercel.app/api?type=rect&color=0:0F172A,100:7C3AED&height=10&section=header"></p>
+
+<p align="center"><sub>Reverse-engineering MCP tools</sub></p>
+
+<p align="center"><a href="#quick-start">Quick start</a> &nbsp;·&nbsp; <a href="#how-rea-works">How REA works</a> &nbsp;·&nbsp; <a href="#what-you-can-analyze">What you can analyze</a> &nbsp;·&nbsp; <a href="#showcases">Showcases</a> &nbsp;·&nbsp; <a href="https://github.com/Namnarak/rea/issues">Issues</a> &nbsp;·&nbsp; <a href="https://github.com/Namnarak/rea/releases">Releases</a></p>
+
+<!-- CYTECH_README_REFRESH:END -->
+
+> [!NOTE]
+> This repository carries documentation and resources from [morluto/rea](https://github.com/morluto/rea). The upstream attribution, links and installation instructions below are intentionally preserved.
+
 ---
 
 See a feature in an app that you want in your own product? Ask your agent to investigate it with REA. It can inspect the app without its source code, explain how the feature works, show the evidence, and build a version for your project.
