@@ -1,5 +1,7 @@
 <div align="center">
 
+<p><img src="website/public/assets/favicon.svg" alt="rea logo" width="136" /></p>
+
 **English** · [简体中文](README_zh.md) · [日本語](README_ja.md) · [한국어](README_ko.md) · [العربية](README_ar.md)
 
 # REA: Reverse Engineer Anything
@@ -327,19 +329,19 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and checks,
 
 [Website](https://morluto.github.io/rea/) · [npm](https://www.npmjs.com/package/rea-agents) · [skills.sh](https://skills.sh/morluto/rea/reverse-engineer-anything) · [Issues](https://github.com/morluto/rea/issues) · [Security](SECURITY.md)
 
-## Star history
+<!-- CYTECH_STAR_HISTORY:START -->
 
-🎉 **20,000 GitHub stars — thank you!**
+## Star History
 
-Thanks to everyone using REA, reporting bugs, testing builds, and contributing fixes.
-
-<a href="https://www.star-history.com/?repos=morluto%2Frea&amp;type=date">
+<a href="https://star-history.dera.page/#Namnarak/rea&type=date&legend=top-left">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=morluto/rea&amp;type=date&amp;theme=dark&amp;legend=top-left" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=morluto/rea&amp;type=date" />
-    <img alt="REA GitHub star history" src="https://api.star-history.com/chart?repos=morluto/rea&amp;type=date" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=Namnarak/rea&type=date&legend=top-left&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=Namnarak/rea&type=date&legend=top-left" />
+    <img alt="GitHub star history for Namnarak/rea" src="https://star-history.dera.page/svg?repos=Namnarak/rea&type=date&legend=top-left" width="800" />
   </picture>
 </a>
+
+<!-- CYTECH_STAR_HISTORY:END -->
 
 ## Disclaimer
 
